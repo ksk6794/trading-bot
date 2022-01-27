@@ -1,5 +1,6 @@
 import abc
 import asyncio
+import inspect
 import logging
 from decimal import Decimal
 from itertools import chain
@@ -183,9 +184,6 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         if not self.contract or not self.price:
             return
 
-        if self.command_handler.is_pending:
-            return
-
         command = PlaceOrder(
             contract=self.contract,
             position_side=position_side,
@@ -267,7 +265,7 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         if not self.price:
             return
 
-        if self.command_handler.is_pending:
+        if self.command_handler.has_outgoing_commands or self.command_handler.is_pending:
             return
 
         interval = self.settings.signal_check_interval
@@ -466,4 +464,7 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         callbacks = self._callbacks.get(action, set())
 
         for cb in callbacks:
-            self._loop.create_task(cb(*args, **kwargs))
+            result = cb(*args, **kwargs)
+
+            if inspect.isawaitable(result):
+                await result

@@ -62,6 +62,7 @@ class PumpStrategy(BaseStrategy):
                 return
 
         print('open', bool(position))
+
         self.open_short(
             quantity=quantity,
             trailing=True

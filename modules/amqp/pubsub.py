@@ -33,7 +33,7 @@ class AMQPConnection(BaseAMQPClient):  # pragma: no cover
 
     async def _message_callback(self, channel, body, envelope, properties):
         msg = self._deserialize(body)
-        await self._wait_callbacks(self._message_callbacks, msg, properties.reply_to)
+        await self._trigger_callbacks(self._message_callbacks, msg, properties.reply_to)
         await channel.basic_client_ack(delivery_tag=envelope.delivery_tag)
 
     def add_message_callback(self, callback):

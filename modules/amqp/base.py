@@ -59,21 +59,13 @@ class BaseAMQPClient(object):  # pragma: no cover
         self._connect_lock = asyncio.Lock()
         self._wait = asyncio.Future()
 
-    def _trigger_callbacks(self, callbacks, *args, exec_tasks=True, **kwargs):
-        tasks = []
+    @staticmethod
+    async def _trigger_callbacks(callbacks, *args, **kwargs):
         for callback in callbacks:
             result = callback(*args, **kwargs)
-            if inspect.isawaitable(result):
-                if exec_tasks:
-                    self._loop.create_task(result)
-                else:
-                    tasks.append(result)
-        return tasks
 
-    async def _wait_callbacks(self, *args, **kwargs):
-        tasks = self._trigger_callbacks(*args, exec_tasks=False, **kwargs)
-        if tasks:
-            await asyncio.gather(*tasks)
+            if inspect.isawaitable(result):
+                await result
 
     @staticmethod
     def get_connector(*args, **kwargs):
@@ -164,7 +156,8 @@ class BaseAMQPClient(object):  # pragma: no cover
                 logging.info('%s.connected', self.__class__.__name__)
 
                 self._wait.set_result(channel)
-                self._trigger_callbacks(self._reconnect_callbacks if self._reconnected else self._connect_callbacks)
+                callbacks = self._reconnect_callbacks if self._reconnected else self._connect_callbacks
+                await self._trigger_callbacks(callbacks)
                 self._reconnected = True
 
                 while not self.is_closed:
@@ -174,7 +167,7 @@ class BaseAMQPClient(object):  # pragma: no cover
 
                 logging.info(f'{self.__class__.__name__}.disconnected')
 
-                self._trigger_callbacks(self._disconnect_callbacks)
+                await self._trigger_callbacks(self._disconnect_callbacks)
 
             except (ConnectionResetError, ConnectionRefusedError, socket.gaierror) as e:
                 logging.warning(f'{self.__class__.__name__}.connect: {e}')

@@ -73,16 +73,16 @@ class LineSubscriber:
         self._callbacks.setdefault('done', set()).add(cb)
 
     # noinspection PyProtectedMember
-    def _on_reconnect(self):
+    async def _on_reconnect(self):
         callbacks = self._callbacks.get('reconnect', set())
-        self._client._trigger_callbacks(callbacks)
+        await self._client._trigger_callbacks(callbacks)
 
     # noinspection PyUnusedLocal,PyProtectedMember
-    def _on_message(self, body, reply_to):
+    async def _on_message(self, body, reply_to):
         """
         Accepts messages from LineServer
         """
         action = body.get('action')
         payload = body.get('payload', {})
         callbacks = self._callbacks.get(action, set())
-        self._client._trigger_callbacks(callbacks, **payload)
+        await self._client._trigger_callbacks(callbacks, **payload)
