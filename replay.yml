@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  bot-replay:
+    build:
+      context: "."
+      dockerfile: ".docker/python-service/Dockerfile"
+    command: [ "./wait-for-it.sh", "rabbitmq:5672", "--", "python", "-m", "services.bot" ]
+    environment:
+      - BROKER_AMQP_URI=amqp://guest:guest@rabbitmq:5672/
+      - MONGO_URI=mongodb://root:root@mongodb:27017/default
+      - BINANCE_PUBLIC_KEY=${BINANCE_PUBLIC_KEY}
+      - BINANCE_PRIVATE_KEY=${BINANCE_PRIVATE_KEY}
+      - SYMBOL=ETHUSDT
+      - STRATEGY=dump
+      - TRAILING_CALLBACK_RATE=1.5
+      - TIMEFRAME=1h
+      - ROC_PERIOD=24
+      # BTC: 0.5, ETH: 1, BNB: 1, ADA: 1.5, DOT: 1, TRX: 1, MINA: 1.5
+      - ROC_SENSITIVITY_FACTOR=1
+      - REPLAY=1
+      - REPLAY_SPEED=0
+      - REPLAY_FROM=0
+      - REPLAY_TO=0
+    volumes:
+      - .:/service
+    depends_on:
+      - mongodb
+      - rabbitmq
+
+  mongodb:
+    image: "mongo:latest"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=root
+      - MONGO_INITDB_DATABASE=default
+    ports:
+      - 27017:27017
+    volumes:
+      - ./.docker/mongo/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+      - mongodb:/data/db
+    restart: always
+
+  rabbitmq:
+    image: "rabbitmq:management"
+    environment:
+      - DEFAULT_USER=guest
+      - DEFAULT_PASS=guest
+    ports:
+      - 5672:5672
+      - 15672:15672
+    restart: always
+
+volumes:
+  mongodb:
+    external: true
+  portainer:
+    external: true

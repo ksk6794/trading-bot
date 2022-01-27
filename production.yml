@@ -1,0 +1,122 @@
+version: '3.8'
+
+services:
+#    line-1:
+#      build:
+#        context: "."
+#        dockerfile: ".docker/python-service/Dockerfile"
+#      command: [ "./wait-for-it.sh", "rabbitmq:5672", "--", "python", "-m", "services.line" ]
+#      environment:
+#        - BROKER_AMQP_URI=amqp://guest:guest@rabbitmq:5672/
+#        - MONGO_URI=mongodb://root:root@mongodb:27017/default
+#        - SYMBOLS=["BTCUSDT","ETHUSDT","BNBUSDT","ADAUSDT","DOTUSDT"]
+#      volumes:
+#        - .:/service
+#      depends_on:
+#        - mongodb
+#        - rabbitmq
+#
+#    line-2:
+#      build:
+#        context: "."
+#        dockerfile: ".docker/python-service/Dockerfile"
+#      command: [ "./wait-for-it.sh", "rabbitmq:5672", "--", "python", "-m", "services.line" ]
+#      environment:
+#        - BROKER_AMQP_URI=amqp://guest:guest@rabbitmq:5672/
+#        - MONGO_URI=mongodb://root:root@mongodb:27017/default
+#        - SYMBOLS=["ATOMUSDT","MATICUSDT","AVAXUSDT","DOGEUSDT","TRXUSDT"]
+#      volumes:
+#        - .:/service
+#      depends_on:
+#        - mongodb
+#        - rabbitmq
+#
+#    line-logger:
+#      build:
+#        context: "."
+#        dockerfile: ".docker/python-service/Dockerfile"
+#      command: [ "./wait-for-it.sh", "rabbitmq:5672", "--", "python", "-m", "services.line_logger" ]
+#      environment:
+#        - BROKER_AMQP_URI=amqp://guest:guest@rabbitmq:5672/
+#        - MONGO_URI=mongodb://root:root@mongodb:27017/default
+#        - SYMBOLS=["BTCUSDT","ETHUSDT","BNBUSDT","ADAUSDT","DOTUSDT","ATOMUSDT","MATICUSDT","AVAXUSDT","DOGEUSDT","TRXUSDT"]
+#        - BULK_INTERVAL=10
+#        - ENTITIES=["book","trade"]  # Depth takes up a lot of space!
+#      volumes:
+#        - .:/service
+#      depends_on:
+#        - mongodb
+#        - rabbitmq
+
+  bot:
+    build:
+      context: "."
+      dockerfile: ".docker/python-service/Dockerfile"
+    command: [ "./wait-for-it.sh", "rabbitmq:5672", "--", "python", "-m", "services.bot" ]
+    environment:
+      - BROKER_AMQP_URI=amqp://guest:guest@rabbitmq:5672/
+      - MONGO_URI=mongodb://root:root@mongodb:27017/default
+      - BINANCE_PUBLIC_KEY=${BINANCE_PUBLIC_KEY}
+      - BINANCE_PRIVATE_KEY=${BINANCE_PRIVATE_KEY}
+      - SYMBOL=ETHUSDT
+      - STRATEGY=dump
+      - TRAILING_CALLBACK_RATE=1.5
+      - TIMEFRAME=1h
+      - ROC_PERIOD=24
+      # BTC: 0.5, ETH: 1, BNB: 1, ADA: 1.5, DOT: 1, TRX: 1
+      - ROC_SENSITIVITY_FACTOR=1
+    volumes:
+      - .:/service
+    depends_on:
+      - mongo
+      - rabbitmq
+
+  mongodb:
+    image: "mongo:latest"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=root
+      - MONGO_INITDB_DATABASE=default
+    ports:
+      - 27017:27017
+    volumes:
+      - ./.docker/mongo/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+      - mongodb:/data/db
+    restart: always
+
+  mongo-express:
+    image: "mongo-express"
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: root
+      ME_CONFIG_MONGODB_ADMINPASSWORD: root
+      ME_CONFIG_MONGODB_URL: mongodb://root:root@mongodb:27017/
+    ports:
+      - 8081:8081
+    restart: always
+
+  rabbitmq:
+    image: "rabbitmq:management"
+    environment:
+      - DEFAULT_USER=guest
+      - DEFAULT_PASS=guest
+    ports:
+      - 5672:5672
+      - 15672:15672
+    restart: always
+
+  portainer:
+    image: "portainer/portainer"
+    command: -H unix:///var/run/docker.sock
+    restart: always
+    ports:
+      - 9000:9000
+      - 8000:8000
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer:/data
+
+volumes:
+  mongodb:
+    external: true
+  portainer:
+    external: true

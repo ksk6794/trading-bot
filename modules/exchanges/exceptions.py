@@ -1,0 +1,2 @@
+class OperationFailed(Exception):
+    pass
