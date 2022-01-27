@@ -1,5 +1,3 @@
-import logging
-
 import orjson
 
 from .base import BaseAMQPClient
@@ -16,14 +14,12 @@ class AMQPConnection(BaseAMQPClient):  # pragma: no cover
             exchange_name: str,
             amqp_uri: str,
             queue_name: str = None,
-            allow_exceptions: bool = False,
             **kwargs
     ):
         super().__init__(url=amqp_uri, **kwargs)
 
         self._exchange_name = exchange_name
         self._queue_name = queue_name
-        self._allow_exceptions = allow_exceptions
         self._message_callbacks = set()
 
     def _serialize(self, data: dict) -> bytes:
@@ -37,24 +33,8 @@ class AMQPConnection(BaseAMQPClient):  # pragma: no cover
 
     async def _message_callback(self, channel, body, envelope, properties):
         msg = self._deserialize(body)
-        task = self._wait_callbacks(
-            self._message_callbacks,
-            msg,
-            properties.reply_to
-        )
-
-        if self._allow_exceptions:
-            try:
-                await task
-            except Exception:
-                logging.exception('%s.message_callback: exception while processing %r', self.__class__.__name__, msg)
-            else:
-                await channel.basic_client_ack(
-                    delivery_tag=envelope.delivery_tag)
-        else:
-            await task
-            await channel.basic_client_ack(
-                delivery_tag=envelope.delivery_tag)
+        await self._wait_callbacks(self._message_callbacks, msg, properties.reply_to)
+        await channel.basic_client_ack(delivery_tag=envelope.delivery_tag)
 
     def add_message_callback(self, callback):
         assert callable(callback)

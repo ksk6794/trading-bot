@@ -8,9 +8,7 @@ from typing import Any, Optional, List, Callable, Dict, Set
 from modules.mongo import MongoClient
 from modules.exchanges import BinanceClient
 from modules.models import PositionModel, OrderModel, BookUpdateModel, ContractModel
-from modules.models.types import (
-    PositionId, OrderSide, OrderType, PositionStatus, PositionSide, OrderId, CommandAction
-)
+from modules.models.types import PositionId, OrderSide, OrderType, PositionStatus, PositionSide, OrderId, CommandAction
 from modules.models.commands import Command, TrailingStop, PlaceOrder
 
 from services.bot.strategies.base.utils import method_dispatch

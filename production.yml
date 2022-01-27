@@ -15,7 +15,7 @@ services:
 #      depends_on:
 #        - mongodb
 #        - rabbitmq
-#
+
 #    line-2:
 #      build:
 #        context: "."
@@ -30,7 +30,7 @@ services:
 #      depends_on:
 #        - mongodb
 #        - rabbitmq
-#
+
 #    line-logger:
 #      build:
 #        context: "."
@@ -48,28 +48,28 @@ services:
 #        - mongodb
 #        - rabbitmq
 
-  bot:
-    build:
-      context: "."
-      dockerfile: ".docker/python-service/Dockerfile"
-    command: [ "./wait-for-it.sh", "rabbitmq:5672", "--", "python", "-m", "services.bot" ]
-    environment:
-      - BROKER_AMQP_URI=amqp://guest:guest@rabbitmq:5672/
-      - MONGO_URI=mongodb://root:root@mongodb:27017/default
-      - BINANCE_PUBLIC_KEY=${BINANCE_PUBLIC_KEY}
-      - BINANCE_PRIVATE_KEY=${BINANCE_PRIVATE_KEY}
-      - SYMBOL=ETHUSDT
-      - STRATEGY=dump
-      - TRAILING_CALLBACK_RATE=1.5
-      - TIMEFRAME=1h
-      - ROC_PERIOD=24
-      # BTC: 0.5, ETH: 1, BNB: 1, ADA: 1.5, DOT: 1, TRX: 1
-      - ROC_SENSITIVITY_FACTOR=1
-    volumes:
-      - .:/service
-    depends_on:
-      - mongo
-      - rabbitmq
+#  bot:
+#    build:
+#      context: "."
+#      dockerfile: ".docker/python-service/Dockerfile"
+#    command: [ "./wait-for-it.sh", "rabbitmq:5672", "--", "python", "-m", "services.bot" ]
+#    environment:
+#      - BROKER_AMQP_URI=amqp://guest:guest@rabbitmq:5672/
+#      - MONGO_URI=mongodb://root:root@mongodb:27017/default
+#      - BINANCE_PUBLIC_KEY=${BINANCE_PUBLIC_KEY}
+#      - BINANCE_PRIVATE_KEY=${BINANCE_PRIVATE_KEY}
+#      - SYMBOL=ETHUSDT
+#      - STRATEGY=dump
+#      - TRAILING_CALLBACK_RATE=1.5
+#      - TIMEFRAME=1h
+#      - ROC_PERIOD=24
+#      # BTC: 0.5, ETH: 1, BNB: 1, ADA: 1.5, DOT: 1, TRX: 1
+#      - ROC_SENSITIVITY_FACTOR=1
+#    volumes:
+#      - .:/service
+#    depends_on:
+#      - mongo
+#      - rabbitmq
 
   mongodb:
     image: "mongo:latest"

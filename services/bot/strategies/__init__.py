@@ -2,11 +2,12 @@ from typing import Type
 
 from .base import BaseStrategy
 from .dump import DumpStrategy
+from .pump import PumpStrategy
 from .scalp import ScalpStrategy
 from .test import TestStrategy
 
 
-STRATEGIES = {DumpStrategy, ScalpStrategy, TestStrategy}
+STRATEGIES = {PumpStrategy, DumpStrategy, ScalpStrategy, TestStrategy}
 STRATEGIES_BY_NAME = {strategy.name: strategy for strategy in STRATEGIES}
 
 

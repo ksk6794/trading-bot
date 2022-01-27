@@ -209,24 +209,15 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         if not (self.price and self.contract and self.account):
             return
 
-        # TODO: consider current leverage
         price = self.price.bid if order_side is OrderSide.BUY else self.price.ask
-        asset = self.contract.quote_asset if order_side == OrderSide.BUY else self.contract.base_asset
-
-        if asset not in self.account.assets:
-            return
-
-        balance = self.account.assets[asset].wallet_balance
-        quantity = balance * balance_stake * self.settings.leverage
-
-        if order_side is OrderSide.BUY:
-            quantity = quantity / price
-
+        balance = self.account.assets[self.contract.quote_asset].wallet_balance
+        quantity = balance * balance_stake * self.settings.leverage / price
         quantity = remove_exponent(round(quantity / self.contract.lot_size) * self.contract.lot_size)
 
         if quantity * price < self.contract.min_notional:
             logging.error(f'"calc_trade_quantity": The quantity is too small! '
-                          f'asset={asset}; '
+                          f'quote_asset={self.contract.quote_asset}; '
+                          f'base_asset={self.contract.base_asset}'
                           f'balance={balance}; '
                           f'balance_stake={balance_stake}; '
                           f'quantity={quantity}; '
@@ -244,7 +235,7 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         )
         self.depth.set_snapshot(depth)
 
-    async def _on_book_update(self, model: BookUpdateModel):
+    def _on_book_update(self, model: BookUpdateModel):
         self.price = model
 
         if not self._ready.is_set():
@@ -262,17 +253,19 @@ class BaseStrategy(metaclass=abc.ABCMeta):
                 if position:
                     pnl = position.calc_pnl(self.price)
                     print(position.side, pnl)
+
                     self.check_stop_loss(position)
                     self.check_take_profit(position)
 
-        await asyncio.sleep(0)  # to prevent loop locks
-
-    async def _on_trade_update(self, model: TradeUpdateModel):
+    def _on_trade_update(self, model: TradeUpdateModel):
         if not self._ready.is_set():
             return
 
         self._check_delay(model.timestamp)
         tick_type = self.candles.update(model)
+
+        if not self.price:
+            return
 
         if self.command_handler.is_pending:
             return
@@ -284,8 +277,6 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         if (diff >= interval * 1000) or tick_type is TickType.NEW_CANDLE:
             self.check_signal(tick_type)
             self._last_signal_check = model.timestamp
-
-        await asyncio.sleep(0)  # to prevent loop locks
 
     async def _on_depth_update(self, model: DepthUpdateModel):
         if not self._ready.is_set():

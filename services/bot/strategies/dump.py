@@ -37,7 +37,7 @@ class DumpStrategy(BaseStrategy):
         print(f'RSI: {rsi};')
 
         # Более слабые dump не интересны
-        if rsi <= 25:
+        if rsi <= 20:
             price = self.price.ask
             position = self.storage.get_position(position_side=PositionSide.LONG)
             balance_stake = Decimal('0.1')
