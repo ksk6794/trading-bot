@@ -47,15 +47,13 @@ class LineServer:
 
     async def _on_trade_update(self, symbol: Symbol, model: TradeUpdateModel):
         await self.publisher.publish(
+            action='update',
+            payload={
+                'entity': StreamEntity.TRADE,
+                'symbol': symbol,
+                'data': model.dict(),
+            },
             routing_key=f'{symbol}.{StreamEntity.TRADE}',
-            body={
-                'action': 'update',
-                'payload': {
-                    'entity': StreamEntity.TRADE,
-                    'symbol': symbol,
-                    'data': model.dict(),
-                }
-            }
         )
 
     async def _on_book_update(self, symbol: Symbol, model: BookUpdateModel):
@@ -67,38 +65,33 @@ class LineServer:
             self.prices[symbol] = model
 
             await self.publisher.publish(
+                action='update',
+                payload={
+                    'entity': StreamEntity.BOOK,
+                    'symbol': symbol,
+                    'data': model.dict(),
+                },
                 routing_key=f'{symbol}.{StreamEntity.BOOK}',
-                body={
-                    'action': 'update',
-                    'payload': {
-                        'entity': StreamEntity.BOOK,
-                        'symbol': symbol,
-                        'data': model.dict(),
-                    }
-                }
             )
 
     async def _on_depth_update(self, symbol: Symbol, model: DepthUpdateModel):
         await self.publisher.publish(
+            action='update',
+            payload={
+                'entity': StreamEntity.DEPTH,
+                'symbol': symbol,
+                'data': model.dict(),
+            },
             routing_key=f'{symbol}.{StreamEntity.DEPTH}',
-            body={
-                'action': 'update',
-                'payload': {
-                    'entity': StreamEntity.DEPTH,
-                    'symbol': symbol,
-                    'data': model.dict(),
-                }
-            }
         )
 
     async def _alive_task(self):
         while self._started:
             try:
                 await self.publisher.publish(
+                    action='alive',
                     routing_key='alive',
-                    body={
-                        'action': 'alive'
-                    }
+                    payload=None,
                 )
 
             except Exception as err:

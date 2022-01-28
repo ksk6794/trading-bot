@@ -36,7 +36,6 @@ class BaseLineClient:
         }
         self._loop = asyncio.get_event_loop()
 
-        self.subscriber.add_reconnect_callback(self._on_reconnect)
         self.subscriber.add_alive_callback(self._on_alive)
         self.subscriber.add_update_callback(self._on_update)
 
@@ -70,10 +69,6 @@ class BaseLineClient:
     async def _on_update(self, entity: StreamEntity, symbol: Symbol, data: Dict):
         ...
 
-    async def _on_reconnect(self):
-        logging.info(f'{self.__class__.__name__}: reconnected')
-        await self._subscribe()
-
     def _on_alive(self):
         self._last_alive = time()
         logging.info(f'{self.__class__.__name__}: alive received')
@@ -102,8 +97,8 @@ class LineClient(BaseLineClient):
         super().add_update_callback(entity, cb)
 
     async def _subscribe(self):
-        binding_keys = ['alive', *[f'{self.symbol}.{entity}' for entity in self._entities]]
-        await self.subscriber.subscribe(binding_keys)
+        routing_keys = ['alive', *[f'{self.symbol}.{entity}' for entity in self._entities]]
+        await self.subscriber.subscribe(routing_keys)
 
     async def _on_update(self, entity: StreamEntity, symbol: Symbol, data: Dict):
         assert StreamEntity.has_value(entity)
@@ -129,8 +124,8 @@ class BulkLineClient(BaseLineClient):
         super().add_update_callback(entity, cb)
 
     async def _subscribe(self):
-        binding_keys = ['alive', *[f'{symbol}.{entity}' for symbol, entity in product(self.symbols, self._entities)]]
-        await self.subscriber.subscribe(binding_keys)
+        routing_keys = ['alive', *[f'{symbol}.{entity}' for symbol, entity in product(self.symbols, self._entities)]]
+        await self.subscriber.subscribe(routing_keys)
 
     async def _on_update(self, entity: StreamEntity, symbol: Symbol, data: Dict):
         assert StreamEntity.has_value(entity)

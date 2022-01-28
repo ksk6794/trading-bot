@@ -1,4 +1,4 @@
-aioamqp==0.14.0
+aio-pika==6.8.2
 aiohttp==3.7.4.post0
 async-timeout==3.0.1
 cryptography==3.4.8
