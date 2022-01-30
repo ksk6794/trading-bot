@@ -39,7 +39,7 @@ class BaseLineClient:
         self.subscriber.add_alive_callback(self._on_alive)
         self.subscriber.add_update_callback(self._on_update)
 
-    async def start(self):
+    async def connect(self):
         if not self._started:
             await self.subscriber.connect()
             await self._subscribe()

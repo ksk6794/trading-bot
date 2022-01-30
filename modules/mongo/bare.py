@@ -107,6 +107,16 @@ class BareMongoClient:  # pragma: no cover
         data = self._convert(self._to_document(model))
         return await collection.replace_one(query, data, session=session)
 
+    async def upsert(
+            self,
+            model: BaseModel,
+            query: Dict,
+            session: Optional[ClientSession] = None
+    ):
+        collection = self._get_collection(model)
+        data = self._convert(self._to_document(model))
+        await collection.replace_one(query, data, upsert=True, session=session)
+
     async def delete(
             self,
             model: Type[BaseModel],

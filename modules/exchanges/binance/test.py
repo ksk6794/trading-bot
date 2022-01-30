@@ -11,10 +11,13 @@ async def main(client: BinanceClient):
     contract = contracts[Symbol('BTCUSDT')]
 
     # await client.change_leverage(contract, 5)
-    acc = await client.get_account_info()
+    # acc = await client.get_account_info()
 
-    await client.change_position_mode(hedge_mode=True)
-    print(acc)
+    listen_key = await client.create_listen_key()
+    print(listen_key)
+
+    # await client.change_position_mode(hedge_mode=True)
+    # print(acc)
 
     # res = await client.place_order(
     #     contract=contract,

@@ -16,6 +16,15 @@ class TradeUpdateModel(BaseModel):
     timestamp: Timestamp = Field(..., alias='t')
     is_buyer_maker: bool = Field(..., alias='m')
 
+    @classmethod
+    def from_stream(cls, data: Dict):
+        return cls(
+            price=data['p'],
+            quantity=data['q'],
+            timestamp=int(data['T']),
+            is_buyer_maker=data['m'],
+        )
+
     def encode(self):
         return {
             'p': str(remove_exponent(self.price)),
@@ -35,6 +44,13 @@ class BookUpdateModel(BaseModel):
 
     bid: Decimal = Field(..., alias='b')
     ask: Decimal = Field(..., alias='a')
+
+    @classmethod
+    def from_stream(cls, data: Dict):
+        return cls(
+            bid=data['b'],
+            ask=data['a'],
+        )
 
     def get_price(self, order_side: OrderSide) -> Decimal:
         book = {
@@ -64,6 +80,17 @@ class DepthUpdateModel(BaseModel):
     bids: List[List[Decimal]] = Field(..., alias='b')
     asks: List[List[Decimal]] = Field(..., alias='a')
     timestamp: Timestamp = Field(..., alias='t')
+
+    @classmethod
+    def from_stream(cls, data: Dict):
+        return cls(
+            symbol=data['s'],
+            first_update_id=data['U'],
+            last_update_id=data['u'],
+            bids=data['b'],
+            asks=data['a'],
+            timestamp=data['E'],
+        )
 
     def encode(self):
         return {

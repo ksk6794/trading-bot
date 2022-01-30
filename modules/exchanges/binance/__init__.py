@@ -1,2 +1,2 @@
 from .client import BinanceClient
-from .stream import BinanceStreamClient
+from .stream import BinanceUserStreamClient, BinanceStreamClient

@@ -19,6 +19,10 @@ class AutoName(str, BaseEnum):
     def _generate_next_value_(name, start, count, last_values):
         return name.lower()
 
+    @classmethod
+    def has_value(cls, value: str):
+        return value in cls._value2member_map_
+
 
 class AutoNameUp(str, BaseEnum):
     """https://docs.python.org/3.8/library/enum.html#using-automatic-values"""
@@ -27,9 +31,14 @@ class AutoNameUp(str, BaseEnum):
     def _generate_next_value_(name, start, count, last_values):
         return name.upper()
 
+    @classmethod
+    def has_value(cls, value: str):
+        return value in cls._value2member_map_
+
 
 PositionId = NewType('PositionId', str)
 OrderId = NewType('OrderId', int)
+ClientOrderId = NewType('ClientOrderId', str)
 Timestamp = NewType('Timestamp', int)
 Symbol = NewType('Symbol', str)
 Asset = NewType('Asset', str)
@@ -42,9 +51,11 @@ class StreamEntity(AutoName):
     TRADE = auto()
     DEPTH = auto()
 
-    @classmethod
-    def has_value(cls, value: str):
-        return value in cls._value2member_map_
+
+@unique
+class UserStreamEntity(AutoNameUp):
+    ACCOUNT_UPDATE = auto()
+    ORDER_TRADE_UPDATE = auto()
 
 
 @unique
@@ -105,8 +116,3 @@ class TimeInForce(AutoNameUp):
     OC = auto()   # Immediate or Cancel
     FOK = auto()  # Fill or Kill
     GTX = auto()  # Good Till Crossing (Post Only)
-
-
-@unique
-class CommandAction(AutoNameUp):
-    ORDER_FILLED = auto()

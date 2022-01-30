@@ -12,18 +12,17 @@ from yarl import URL
 class WebSocketClient:
     def __init__(
             self,
-            url: URL,
             session: Optional[ClientSession] = None,
             receive_timeout: int = 30,
             reconnect_timeout: int = 5
     ):
-        self._url = url
         self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self._ready = asyncio.Event()
         self.session = session or aiohttp.ClientSession()
         self.callbacks: Dict[str: Set[Callable]] = {}
         self._receive_timeout = receive_timeout
         self._reconnect_timeout = reconnect_timeout
+        self._task: Optional[asyncio.Task] = None
         self._loop = asyncio.get_event_loop()
 
     def add_connect_callback(self, cb: Callable):
@@ -54,14 +53,14 @@ class WebSocketClient:
     def is_ready(self):
         return self._ready.is_set()
 
-    async def connect(self):
+    async def connect(self, url: URL):
         logging.info('WebSocket: Connection establishing...')
-        self._loop.create_task(self._task())
+        self._task = self._loop.create_task(self._fetch(url))
         await self.wait_ready()
 
-    async def _task(self):
+    async def _fetch(self, url: URL):
         while True:
-            async with self.session.ws_connect(self._url, receive_timeout=self._receive_timeout) as ws:
+            async with self.session.ws_connect(url, receive_timeout=self._receive_timeout) as ws:
                 logging.info('Websocket: Connection established!')
                 self._ws = ws
                 self._ready.set()

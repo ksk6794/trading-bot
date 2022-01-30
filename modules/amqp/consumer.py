@@ -9,6 +9,8 @@ from aio_pika import IncomingMessage, Exchange, Queue, Channel
 from aio_pika.connection import Connection
 from aio_pika.exceptions import IncompatibleProtocolError
 
+from .base import RobustConnection
+
 
 class AMQPConsumer:
     def __init__(self, uri: str, exchange_name: str):
@@ -28,7 +30,8 @@ class AMQPConsumer:
             try:
                 self._connection = await aio_pika.connect_robust(
                     url=self._uri,
-                    loop=self._loop
+                    loop=self._loop,
+                    connection_class=RobustConnection,
                 )
 
             except ConnectionError as err:
@@ -65,7 +68,6 @@ class AMQPConsumer:
 
         await self._queue.consume(
             callback=self._callback,
-            exclusive=True
         )
 
     def add_message_callback(self, cb: Callable):

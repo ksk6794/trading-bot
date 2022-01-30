@@ -78,6 +78,7 @@ class BaseExchangeClient(metaclass=abc.ABCMeta):
     @abc.abstractmethod
     async def place_order(
             self,
+            client_order_id: str,
             contract: ContractModel,
             order_type: OrderType,
             quantity: Decimal,
@@ -106,17 +107,11 @@ class BaseExchangeClient(metaclass=abc.ABCMeta):
 
 
 class BaseExchangeStreamClient(metaclass=abc.ABCMeta):
-    actions: StreamEntity
-
     def __init__(self):
         self._callbacks: Dict[str, Set[Callable]] = {}
 
     @abc.abstractmethod
     async def connect(self):
-        ...
-
-    @abc.abstractmethod
-    async def subscribe(self, symbols: List[Symbol]):
         ...
 
     def add_connect_callback(self, cb: Callable):
@@ -133,7 +128,7 @@ class BaseExchangeStreamClient(metaclass=abc.ABCMeta):
         assert callable(cb)
         self._callbacks.get(entity, set()).discard(cb)
 
-    async def _trigger_callbacks(self, action, *args, **kwargs):
+    async def _trigger_callbacks(self, action: StreamEntity, *args, **kwargs):
         callbacks = self._callbacks.get(action, set())
 
         for callback in callbacks:

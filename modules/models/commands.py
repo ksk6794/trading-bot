@@ -15,6 +15,16 @@ class Command(BaseModel):
     contract: ContractModel
     next_time: bool = False
 
+    def __hash__(self):
+        def _serialize(data: Dict):
+            res = []
+            for a, b in data.items():
+                if isinstance(b, dict):
+                    b = _serialize(b)
+                res.append(f'{a}={b}')
+            return '(' + ';'.join(res) + ')'
+        return hash(_serialize(self.dict()).encode())
+
 
 class TrailingStop(Command):
     price: BookUpdateModel

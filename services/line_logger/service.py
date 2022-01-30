@@ -35,7 +35,7 @@ class LineLogger:
 
     async def start(self):
         await self.db.connect()
-        await self.line.start()
+        await self.line.connect()
         self._started = True
         self._loop.create_task(self._writer())
 

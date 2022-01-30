@@ -5,7 +5,8 @@ from typing import List, Dict, Optional
 from pydantic import BaseModel, validator
 
 from modules.models.types import (
-    PositionId, OrderId, Timestamp, OrderStatus, Symbol, Asset, OrderType, OrderSide, PositionSide
+    PositionId, OrderId, ClientOrderId, Timestamp, Symbol, Asset,
+    OrderStatus, OrderType, OrderSide, PositionSide
 )
 from helpers import remove_exponent
 
@@ -14,15 +15,7 @@ class AccountBalanceModel(BaseModel):
     asset: Asset
     wallet_balance: Decimal
 
-    @validator(
-        'initial_margin',
-        'maintenance_margin',
-        'margin_balance',
-        'wallet_balance',
-        'unrealized_pnl',
-        always=True,
-        check_fields=False
-    )
+    @validator('wallet_balance', always=True, check_fields=False)
     def validate_decimals(cls, value):
         return remove_exponent(value)
 
@@ -30,7 +23,14 @@ class AccountBalanceModel(BaseModel):
     def from_binance(cls, data: Dict):
         return cls(
             asset=data['asset'],
-            wallet_balance=data['walletBalance'],
+            wallet_balance=data['crossWalletBalance'],
+        )
+
+    @classmethod
+    def from_user_stream(cls, data: Dict):
+        return cls(
+            asset=data['a'],
+            wallet_balance=data['cw']
         )
 
 
@@ -39,7 +39,6 @@ class AccountPositionModel(BaseModel):
     side: PositionSide
     quantity: Decimal
     entry_price: Decimal
-    leverage: int
     isolated: bool
 
     @validator('entry_price', always=True)
@@ -57,8 +56,17 @@ class AccountPositionModel(BaseModel):
             side=data['positionSide'],
             quantity=data['positionAmt'],
             entry_price=data['entryPrice'],
-            leverage=data['leverage'],
             isolated=data['isolated'],
+        )
+
+    @classmethod
+    def from_user_stream(cls, data: Dict):
+        return cls(
+            symbol=data['s'],
+            side=data['ps'],
+            quantity=data['pa'],
+            entry_price=data['ep'],
+            isolated=data['mt'] == 'isolated',
         )
 
 
@@ -71,6 +79,13 @@ class AccountModel(BaseModel):
         return cls(
             assets={i['asset']: AccountBalanceModel.from_binance(i) for i in data['assets']},
             positions=[AccountPositionModel.from_binance(i) for i in data['positions']]
+        )
+
+    @classmethod
+    def from_user_stream(cls, data: Dict):
+        return cls(
+            assets={i['a']: AccountBalanceModel.from_user_stream(i) for i in data['a']['B']},
+            positions=[AccountPositionModel.from_user_stream(i) for i in data['a']['P']]
         )
 
 
@@ -183,11 +198,13 @@ class FundingRateModel(BaseModel):
 
 class OrderModel(BaseModel):
     id: OrderId
+    client_order_id: ClientOrderId
     position_id: Optional[PositionId]
     symbol: Symbol
     status: OrderStatus
     type: OrderType
     side: OrderSide
+    position_side: PositionSide
     quantity: Decimal
     entry_price: Decimal
     context: Optional[Dict]
@@ -201,11 +218,29 @@ class OrderModel(BaseModel):
     def from_binance(cls, data):
         return cls(
             id=data['orderId'],
+            client_order_id=data['clientOrderId'],
             symbol=data['symbol'],
             status=data['status'],
             type=data['type'],
             side=data['side'],
+            position_side=data['positionSide'],
             quantity=data['origQty'],
             entry_price=data['avgPrice'],
             timestamp=int(time.time() * 1000)
+        )
+
+    @classmethod
+    def from_user_stream(cls, data):
+        order_data = data['o']
+        return cls(
+            id=order_data['i'],
+            client_order_id=order_data['c'],
+            symbol=order_data['s'],
+            status=order_data['X'],
+            type=order_data['ot'],
+            side=order_data['S'],
+            position_side=order_data['ps'],
+            quantity=order_data['q'],
+            entry_price=order_data['ap'],
+            timestamp=data['T']
         )

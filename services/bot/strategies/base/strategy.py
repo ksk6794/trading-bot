@@ -14,13 +14,14 @@ from modules.mongo import MongoClient
 from modules.models import ContractModel, OrderModel, PositionModel, AccountModel
 from modules.models.line import TradeUpdateModel, BookUpdateModel, DepthUpdateModel
 from modules.models.types import (
-    PositionStatus, OrderSide, StreamEntity, PositionSide, CommandAction, TickType, Timestamp
+    PositionStatus, OrderSide, StreamEntity, UserStreamEntity,
+    PositionSide, TickType, Timestamp
 )
 from modules.models.strategy import StopLossConfig, TakeProfitConfig
 from modules.models.indexes import INDEXES
+from modules.exchanges import BinanceClient, BinanceUserStreamClient
 from modules.exchanges.base import BaseExchangeClient
 from modules.exchanges.fake import FakeExchangeClient
-from modules.exchanges import BinanceClient
 from modules.line_client import LineClient, ReplayClient
 
 from services.bot.strategies.base.command_handler import CommandHandler
@@ -56,6 +57,7 @@ class BaseStrategy(metaclass=abc.ABCMeta):
 
         if settings.replay:
             logging.warning('*** The strategy is processing historical data! ***')
+            self.exchange = FakeExchangeClient()
             self.line = ReplayClient(
                 db=self.db,
                 symbol=settings.symbol,
@@ -63,18 +65,21 @@ class BaseStrategy(metaclass=abc.ABCMeta):
                 replay_from=settings.replay_from,
                 replay_to=settings.replay_to,
             )
-            self.exchange = FakeExchangeClient(self.line)
             self.line.add_done_callback(self.stop)
 
         else:
+            self.exchange = BinanceClient(
+                public_key=settings.binance_public_key,
+                private_key=settings.binance_private_key,
+                testnet=settings.binance_testnet,
+            )
             self.line = LineClient(
                 symbol=settings.symbol,
                 uri=settings.broker_amqp_uri,
                 entities=settings.entities,
             )
-            self.exchange = BinanceClient(
-                public_key=settings.binance_public_key,
-                private_key=settings.binance_private_key,
+            self.user_stream = BinanceUserStreamClient(
+                exchange=self.exchange,
                 testnet=settings.binance_testnet,
             )
 
@@ -87,6 +92,7 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         self.command_handler = CommandHandler(
             db=self.db,
             exchange=self.exchange,
+            user_stream=self.user_stream,
             storage=self.storage,
             strategy=self.name,
         )
@@ -98,7 +104,7 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         self.line.add_update_callback(StreamEntity.TRADE, self._on_trade_update)
         self.line.add_update_callback(StreamEntity.DEPTH, self._on_depth_update)
 
-        self.command_handler.add_callback(CommandAction.ORDER_FILLED, self._on_order_filled)
+        self.user_stream.add_update_callback(UserStreamEntity.ACCOUNT_UPDATE, self._on_account_update)
 
     def add_start_callback(self, cb: Callable):
         assert asyncio.iscoroutinefunction(cb)
@@ -239,21 +245,20 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         if not self._ready.is_set():
             return
 
-        self.command_handler.set_price(model)
+        if self.command_handler.is_pending:
+            return
 
-        if not self.command_handler.is_pending and self.command_handler.has_outgoing_commands:
+        for position_side in PositionSide.values():
+            position = self.storage.get_position(position_side)
+
+            if position:
+                self.check_stop_loss(position)
+                self.check_take_profit(position)
+
+        # Execute commands
+        if self.command_handler.has_outgoing_commands:
+            self.command_handler.set_price(self.price)
             self.command_handler.execute()
-
-        else:
-            for position_side in (PositionSide.LONG, PositionSide.SHORT):
-                position = self.storage.get_position(position_side)
-
-                if position:
-                    pnl = position.calc_pnl(self.price)
-                    print(position.side, pnl)
-
-                    self.check_stop_loss(position)
-                    self.check_take_profit(position)
 
     def _on_trade_update(self, model: TradeUpdateModel):
         if not self._ready.is_set():
@@ -265,7 +270,7 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         if not self.price:
             return
 
-        if self.command_handler.has_outgoing_commands or self.command_handler.is_pending:
+        if self.command_handler.is_pending:
             return
 
         interval = self.settings.signal_check_interval
@@ -276,6 +281,11 @@ class BaseStrategy(metaclass=abc.ABCMeta):
             self.check_signal(tick_type)
             self._last_signal_check = model.timestamp
 
+        # Execute commands
+        if self.command_handler.has_outgoing_commands:
+            self.command_handler.set_price(self.price)
+            self.command_handler.execute()
+
     async def _on_depth_update(self, model: DepthUpdateModel):
         if not self._ready.is_set():
             return
@@ -284,10 +294,10 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         self.depth.update(model)
         await asyncio.sleep(0)  # to prevent loop locks
 
-    async def _on_order_filled(self):
-        self.account = await self.exchange.get_account_info()
-        repr_balances = {i.asset: i.wallet_balance for i in self.account.assets.values()}
-        logging.info(f'Current balances: {repr_balances}')
+    async def _on_account_update(self, model: AccountModel):
+        for asset, balance in model.assets.items():
+            self.account.assets[asset] = balance
+        self.account.positions = model.positions
 
     def check_stop_loss(self, position: PositionModel):
         if not self.stop_loss:
@@ -384,7 +394,8 @@ class BaseStrategy(metaclass=abc.ABCMeta):
 
     async def _prepare_resources(self):
         await self.db.connect()
-        await self.line.start()
+        await self.line.connect()
+        await self.user_stream.connect()
 
     async def _preload_data(self):
         contracts = await self.exchange.get_contracts()
@@ -421,8 +432,11 @@ class BaseStrategy(metaclass=abc.ABCMeta):
             db_position = db_positions[side]
             position = account_positions[side]
 
+            def rnd(price: Decimal):
+                return round(price / self.contract.lot_size) * self.contract.lot_size
+
             if (position.quantity and
-                    db_position.entry_price == position.entry_price and
+                    rnd(db_position.entry_price) == rnd(position.entry_price) and
                     db_position.quantity == position.quantity):
                 actual_positions.append(db_position)
 
@@ -445,8 +459,8 @@ class BaseStrategy(metaclass=abc.ABCMeta):
     async def _configure_leverage(self):
         position = next(filter(lambda x: x.symbol == self.settings.symbol, self.account.positions), None)
 
-        if position and self.settings.leverage != position.leverage:
-            await self.exchange.change_leverage(self.contract, self.settings.leverage)
+        # if position and self.settings.leverage != position.leverage:
+        await self.exchange.change_leverage(self.contract, self.settings.leverage)
 
     def _check_delay(self, timestamp: Timestamp):
         if not self.settings.replay:

@@ -11,10 +11,9 @@ from modules.models import ContractModel, CandleModel, AccountModel, OrderModel,
 from modules.models.exchange import AccountBalanceModel, AccountPositionModel
 from modules.models.types import (
     Symbol, Timeframe, Asset, OrderType, OrderSide, TimeInForce,
-    OrderId, OrderStatus, StreamEntity, PositionSide
+    OrderId, OrderStatus, PositionSide
 )
 from modules.exchanges.base import BaseExchangeClient
-from modules.line_client import ReplayClient
 
 
 class FakeExchangeClient(BaseExchangeClient):
@@ -22,11 +21,8 @@ class FakeExchangeClient(BaseExchangeClient):
     MAKER_FEE = Decimal('0.00016')  # 0.0160% for ≥ 50 BNB
     TAKER_FEE = Decimal('0.0004')  # 0.0400% for ≥ 50 BNB
 
-    def __init__(self, line: ReplayClient, *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-
-        self.line = line
-        self.line.add_update_callback(StreamEntity.BOOK, self._on_book_update)
 
         # Initial state
         self._book: Optional[BookUpdateModel] = None
@@ -84,6 +80,7 @@ class FakeExchangeClient(BaseExchangeClient):
 
     async def place_order(
             self,
+            client_order_id: str,
             contract: ContractModel,
             order_type: OrderType,
             quantity: Decimal,
@@ -137,9 +134,6 @@ class FakeExchangeClient(BaseExchangeClient):
 
     async def get_order(self, contract: ContractModel, order_id: OrderId) -> OrderModel:
         return self._orders[order_id]
-
-    async def _on_book_update(self, model: BookUpdateModel):
-        self._book = model
 
     def _get_fee_stake(self, order_type: OrderType):
         if order_type in (OrderType.LIMIT,):

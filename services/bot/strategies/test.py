@@ -26,7 +26,6 @@ class TestStrategy(BaseStrategy):
         if not position:
             balance_stake = Decimal('0.1')
             quantity = self.calc_trade_quantity(balance_stake, OrderSide.BUY)
-            print('quantity', quantity)
 
             if not quantity:
                 return

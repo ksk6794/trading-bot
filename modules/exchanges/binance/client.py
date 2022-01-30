@@ -133,6 +133,7 @@ class BinanceClient(BaseExchangeClient):
 
     async def place_order(
             self,
+            client_order_id: str,
             contract: ContractModel,
             order_type: OrderType,
             quantity: Decimal,
@@ -168,6 +169,7 @@ class BinanceClient(BaseExchangeClient):
             'positionSide': position_side.upper(),
             'quantity': quantity,
             'type': order_type.upper(),
+            'newClientOrderId': client_order_id,
         }
 
         if price:
@@ -204,6 +206,14 @@ class BinanceClient(BaseExchangeClient):
         }
         body = await self._request('GET', '/fapi/v1/order', params, signed=True) or {}
         return OrderModel.from_binance(body)
+
+    async def create_listen_key(self) -> Optional[str]:
+        body = await self._request('POST', '/fapi/v1/listenKey', signed=True) or {}
+        return body.get('listenKey')
+
+    async def update_listen_key(self) -> Optional[str]:
+        body = await self._request('PUT', '/fapi/v1/listenKey', signed=True) or {}
+        return body.get('listenKey')
 
     async def _request(self, method: str, endpoint: str, params: Optional[Dict] = None, signed: bool = False, **kwargs):
         if signed and params:
