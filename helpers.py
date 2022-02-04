@@ -45,3 +45,7 @@ def format_decimal(d: Decimal, decimal_places=3):
 
 def to_decimal(value: Union[float64, str], digits: int = 2):
     return round(Decimal(value), digits)
+
+
+def to_decimal_places(d: Decimal, decimal_places: Decimal):
+    return round(d / decimal_places) * decimal_places

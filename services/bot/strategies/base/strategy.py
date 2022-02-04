@@ -7,7 +7,7 @@ from itertools import chain
 from time import time
 from typing import Optional, Set, Callable, List, Dict, Any
 
-from helpers import remove_exponent
+from helpers import remove_exponent, to_decimal_places
 from modules.models.commands import TrailingStop, PlaceOrder
 
 from modules.mongo import MongoClient
@@ -241,11 +241,17 @@ class BaseStrategy(metaclass=abc.ABCMeta):
 
     def _on_book_update(self, model: BookUpdateModel):
         self.price = model
+        self.command_handler.set_price(self.price)
 
         if not self._ready.is_set():
             return
 
         if self.command_handler.is_pending:
+            return
+
+        # Execute commands (trailing)
+        if self.command_handler.has_outgoing_commands and not self.command_handler.is_pending:
+            self.command_handler.execute()
             return
 
         for position_side in PositionSide.values():
@@ -256,9 +262,8 @@ class BaseStrategy(metaclass=abc.ABCMeta):
                 self.check_take_profit(position)
 
         # Execute commands
-        if self.command_handler.has_outgoing_commands:
-            self.command_handler.set_price(self.price)
-            self.command_handler.execute()
+        # if self.command_handler.has_outgoing_commands:
+        #     self.command_handler.execute()
 
     def _on_trade_update(self, model: TradeUpdateModel):
         if not self._ready.is_set():
@@ -273,6 +278,11 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         if self.command_handler.is_pending:
             return
 
+        # Execute commands (trailing)
+        if self.command_handler.has_outgoing_commands and not self.command_handler.is_pending:
+            self.command_handler.execute()
+            return
+
         interval = self.settings.signal_check_interval
         diff = model.timestamp - self._last_signal_check
 
@@ -282,9 +292,8 @@ class BaseStrategy(metaclass=abc.ABCMeta):
             self._last_signal_check = model.timestamp
 
         # Execute commands
-        if self.command_handler.has_outgoing_commands:
-            self.command_handler.set_price(self.price)
-            self.command_handler.execute()
+        # if self.command_handler.has_outgoing_commands:
+        #     self.command_handler.execute()
 
     async def _on_depth_update(self, model: DepthUpdateModel):
         if not self._ready.is_set():
@@ -424,21 +433,25 @@ class BaseStrategy(metaclass=abc.ABCMeta):
                 'status': PositionStatus.OPEN,
             }
         )
-        account_positions = {p.side: p for p in self.account.positions if p.symbol == self.settings.symbol}
-        db_positions = {p.side: p for p in positions}
+        account_positions = {
+            position.side: position
+            for position in self.account.positions
+            if position.symbol == self.settings.symbol and position.quantity > 0
+        }
+        db_positions = {position.side: position for position in positions}
         actual_positions = []
 
         for side in set(account_positions) & set(db_positions):
             db_position = db_positions[side]
-            position = account_positions[side]
+            acc_position = account_positions[side]
+            db_position_price = to_decimal_places(db_position.entry_price, self.contract.lot_size)
+            acc_position_price = to_decimal_places(acc_position.entry_price, self.contract.lot_size)
 
-            def rnd(price: Decimal):
-                return round(price / self.contract.lot_size) * self.contract.lot_size
-
-            if (position.quantity and
-                    rnd(db_position.entry_price) == rnd(position.entry_price) and
-                    db_position.quantity == position.quantity):
+            if db_position_price == acc_position_price and db_position.quantity == acc_position.quantity:
                 actual_positions.append(db_position)
+
+        if len(actual_positions) != len(account_positions):
+            raise RuntimeError('Unknown position found!')
 
         orders: List[OrderModel] = await self.db.find(
             model=OrderModel,

@@ -98,4 +98,4 @@ class LineServer:
                 logging.exception(err)
 
             finally:
-                await asyncio.sleep(10)
+                await asyncio.sleep(30)

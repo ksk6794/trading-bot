@@ -10,17 +10,15 @@ class TestStrategy(BaseStrategy):
     # Base strategy configuration
     name = 'test'
     stop_loss = StopLossConfig(
-        rate=Decimal('0.005'),
+        rate=Decimal('0.001'),
     )
     take_profit = TakeProfitConfig(
         steps=[
-            {'level': Decimal('0.005'), 'stake': Decimal('1')},
+            {'level': Decimal('0.001'), 'stake': Decimal('1')},
         ]
     )
 
     def check_signal(self, tick_type: TickType):
-        rsi = self.candles.get_rsi()
-        print(f'RSI: {rsi}')
         position = self.storage.get_position(position_side=PositionSide.LONG)
 
         if not position:
@@ -33,4 +31,5 @@ class TestStrategy(BaseStrategy):
             self.open_long(
                 quantity=quantity,
                 trailing=True,
+                context={'test': 'TEST'}
             )

@@ -49,7 +49,7 @@ class CommandHandler:
 
     @property
     def is_pending(self) -> bool:
-        return bool(self._pending and self._waiting)
+        return bool(self._pending or self._waiting)
 
     @property
     def has_outgoing_commands(self) -> bool:
@@ -65,7 +65,7 @@ class CommandHandler:
         self.price = price
 
     def execute(self):
-        if not self._pending and not self._waiting and self._commands:
+        if not self._pending and self._commands:
             self._pending = True
             self._loop.call_soon(lambda: self._loop.create_task(self._execute_commands()))
 
@@ -104,6 +104,7 @@ class CommandHandler:
         client_order_id = ClientOrderId(uuid4().hex)
         self._waiting[client_order_id] = command
 
+        await self.user_stream.wait_connected()
         await self.exchange.place_order(
             client_order_id=client_order_id,
             contract=command.contract,
@@ -115,12 +116,12 @@ class CommandHandler:
 
     async def _on_order_trade_update(self, order: OrderModel):
         position = self.storage.get_position(order.position_side)
-        command = self._waiting.pop(order.client_order_id, None)
+        command = self._waiting.get(order.client_order_id, None)
 
         if not position:
             position = await self._open_position(order.symbol, order.position_side)
 
-        if command:
+        if command and command.context and not order.context:
             order.context = command.context
 
         order.position_id = position.id
@@ -128,14 +129,14 @@ class CommandHandler:
         await self.db.upsert(order, query={'id': order.id})
         self.storage.add_order(order)
 
-        logging.info(f'Order placed! '
-                     f'position_id={position.id}; '
-                     f'side={order.side}; '
-                     f'quantity={order.quantity}; '
-                     f'price={order.entry_price};')
-
         if order.is_filled:
+            logging.info(f'Order placed! '
+                         f'position_id={position.id}; '
+                         f'side={order.side}; '
+                         f'quantity={order.quantity}; '
+                         f'price={order.entry_price};')
             await self._update_position(position, order)
+            self._waiting.pop(order.client_order_id, None)
 
     async def _open_position(
             self,

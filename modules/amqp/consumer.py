@@ -68,6 +68,7 @@ class AMQPConsumer:
 
         await self._queue.consume(
             callback=self._callback,
+            exclusive=True,
         )
 
     def add_message_callback(self, cb: Callable):
@@ -78,6 +79,7 @@ class AMQPConsumer:
         action = body['action']
         payload = body.get('payload')
         await self._trigger_callbacks(self._callbacks, action, payload)
+        message.ack()
 
     @staticmethod
     async def _trigger_callbacks(callbacks, *args, **kwargs):

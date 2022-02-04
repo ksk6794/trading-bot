@@ -4,7 +4,7 @@ import hashlib
 import logging
 from urllib.parse import urlencode
 from decimal import Decimal
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, NoReturn
 
 import orjson
 from yarl import URL
@@ -14,7 +14,8 @@ from modules.exchanges.base import BaseExchangeClient
 from modules.exchanges.exceptions import OperationFailed
 from modules.models.types import OrderSide, OrderType, TimeInForce, Symbol, Timeframe, MarginType, PositionSide
 from modules.models import AccountModel, FundingRateModel, CandleModel, ContractModel, OrderModel, DepthModel
-from helpers import remove_exponent, date_to_milliseconds
+
+from helpers import remove_exponent, date_to_milliseconds, to_decimal_places
 
 
 class BinanceClient(BaseExchangeClient):
@@ -161,7 +162,7 @@ class BinanceClient(BaseExchangeClient):
                 Long: position_side=PositionSide.LONG, order_side=OrderSide.SELL
                 Short: position_side=PositionSide.SHORT, order_side=OrderSide.BUY
         """
-        quantity = str(remove_exponent(round(quantity / contract.lot_size) * contract.lot_size))
+        quantity = str(to_decimal_places(quantity, contract.lot_size))
         params = {
             'timestamp': int(time.time() * 1000),
             'symbol': contract.symbol,
@@ -211,9 +212,8 @@ class BinanceClient(BaseExchangeClient):
         body = await self._request('POST', '/fapi/v1/listenKey', signed=True) or {}
         return body.get('listenKey')
 
-    async def update_listen_key(self) -> Optional[str]:
-        body = await self._request('PUT', '/fapi/v1/listenKey', signed=True) or {}
-        return body.get('listenKey')
+    async def update_listen_key(self) -> NoReturn:
+        await self._request('PUT', '/fapi/v1/listenKey', signed=True)
 
     async def _request(self, method: str, endpoint: str, params: Optional[Dict] = None, signed: bool = False, **kwargs):
         if signed and params:

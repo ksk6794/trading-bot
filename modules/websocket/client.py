@@ -13,7 +13,7 @@ class WebSocketClient:
     def __init__(
             self,
             session: Optional[ClientSession] = None,
-            receive_timeout: int = 30,
+            receive_timeout: Optional[int] = 30,
             reconnect_timeout: int = 5
     ):
         self._ws: Optional[aiohttp.ClientWebSocketResponse] = None

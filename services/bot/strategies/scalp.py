@@ -30,7 +30,14 @@ class ScalpStrategy(BaseStrategy):
     def check_signal(self, tick_type: TickType):
         self._rsi = self.candles.get_rsi()
         self._stoch = self.candles.get_stochastic()
-        print(f'PRICE: {self.price};', f'RSI: {self._rsi};', f'STOCH: {self._stoch};')
+        # print(f'PRICE: {self.price};', f'RSI: {self._rsi};', f'STOCH: {self._stoch};')
+
+        for position_side in PositionSide:
+            position = self.storage.get_position(position_side)
+
+            if position:
+                pnl = position.calc_pnl(self.price)
+                print(f'ID: {position.id}; SIDE: {position_side}; PNL: {pnl}')
 
         # LONG
         if (

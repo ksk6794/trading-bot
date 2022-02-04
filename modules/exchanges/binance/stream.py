@@ -1,5 +1,7 @@
+import asyncio
 import inspect
 import logging
+from time import time
 from typing import List, Dict, Set, Callable
 
 import orjson
@@ -57,6 +59,7 @@ class BinanceStreamClient(BaseExchangeStreamClient):
 
     async def _on_connect(self):
         self._ws_connected = True
+        await self._trigger_callbacks('connect')
 
     async def _on_message(self, payload: Dict):
         if 'id' in payload:
@@ -90,6 +93,8 @@ class BinanceUserStreamClient:
     API Doc:
     https://binance-docs.github.io/apidocs/futures/en/#user-data-streams
     """
+    KEY_LIFETIME = 60 * 60
+
     def __init__(
             self,
             exchange: BinanceClient,
@@ -100,26 +105,53 @@ class BinanceUserStreamClient:
         self.ws = WebSocketClient(
             session=ClientSession(
                 json_serialize=lambda x: orjson.dumps(x).decode()
-            )
+            ),
+            receive_timeout=None,
         )
         self.ws.add_connect_callback(self._on_connect)
+        self.ws.add_disconnect_callback(self._on_disconnect)
         self.ws.add_message_callback(self._on_message)
 
-        self._ws_connected = False
+        self._connect_event = asyncio.Event()
+        self._listen_key_exp: int = 0
         self._callbacks: Dict[UserStreamEntity, Set] = {}
 
+    @property
+    def is_connected(self) -> bool:
+        return self._connect_event.is_set()
+
+    async def wait_connected(self):
+        await self._connect_event.wait()
+
     async def connect(self):
-        if not self._ws_connected:
+        if not self.is_connected:
+            logging.info('Requesting listen key...')
             listen_key = await self._exchange.create_listen_key()
+            self._listen_key_exp = time() + self.KEY_LIFETIME
+            logging.info('Listen key issued!')
+
             url = self._ws_url.with_path(f'/ws/{listen_key}')
             await self.ws.connect(url)
+            asyncio.create_task(self._key_renewal())
+
+    async def _key_renewal(self):
+        while True:
+            if self._listen_key_exp - time() <= 10 * 60:
+                logging.info('Updating listen key...')
+                await self._exchange.update_listen_key()
+                self._listen_key_exp = time() + self.KEY_LIFETIME
+                logging.info('Listen key updated!')
+            await asyncio.sleep(60)
 
     def add_update_callback(self, event_type: UserStreamEntity, cb: Callable):
         UserStreamEntity.has_value(event_type)
         self._callbacks.setdefault(event_type, set()).add(cb)
 
-    async def _on_connect(self):
-        self._ws_connected = True
+    def _on_connect(self):
+        self._connect_event.set()
+
+    def _on_disconnect(self):
+        self._connect_event.clear()
 
     async def _on_message(self, payload: Dict):
         if 'e' in payload:

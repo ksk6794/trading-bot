@@ -128,7 +128,7 @@ class BaseExchangeStreamClient(metaclass=abc.ABCMeta):
         assert callable(cb)
         self._callbacks.get(entity, set()).discard(cb)
 
-    async def _trigger_callbacks(self, action: StreamEntity, *args, **kwargs):
+    async def _trigger_callbacks(self, action, *args, **kwargs):
         callbacks = self._callbacks.get(action, set())
 
         for callback in callbacks:
