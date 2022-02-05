@@ -27,7 +27,7 @@ async def main(client: BinanceClient):
     # )
     # print(res)
 
-    # res = await client.get_order(contract, 2859466804)
+    # res = await client.get_order(contract.symbol, 2859466804)
     # print(res)
 
 

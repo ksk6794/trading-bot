@@ -18,8 +18,8 @@ from modules.exchanges.base import BaseExchangeClient
 
 class FakeExchangeClient(BaseExchangeClient):
     # https://www.binance.com/en/fee/futureFee
-    MAKER_FEE = Decimal('0.00016')  # 0.0160% for ≥ 50 BNB
-    TAKER_FEE = Decimal('0.0004')  # 0.0400% for ≥ 50 BNB
+    MAKER_FEE = Decimal('0.0002')  # 0.02% for ≥ 0 BNB
+    TAKER_FEE = Decimal('0.0004')  # 0.04% for ≥ 0 BNB
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

@@ -120,11 +120,13 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         await self._configure_mode()
         await self._configure_leverage()
         await self._trigger_callbacks('start')
+        self.command_handler.start()
         self._ready.set()
 
     async def stop(self):
         await self.line.stop()
         await self._trigger_callbacks('stop')
+        self.command_handler.stop()
         self._loop.stop()
 
     @abc.abstractmethod
@@ -470,9 +472,6 @@ class BaseStrategy(metaclass=abc.ABCMeta):
             await self.exchange.change_position_mode(hedge_mode=True)
 
     async def _configure_leverage(self):
-        position = next(filter(lambda x: x.symbol == self.settings.symbol, self.account.positions), None)
-
-        # if position and self.settings.leverage != position.leverage:
         await self.exchange.change_leverage(self.contract, self.settings.leverage)
 
     def _check_delay(self, timestamp: Timestamp):

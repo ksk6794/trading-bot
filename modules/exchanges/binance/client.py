@@ -196,13 +196,13 @@ class BinanceClient(BaseExchangeClient):
         body = await self._request('DELETE', '/fapi/v1/order', params, signed=True) or {}
         return OrderModel.from_binance(body)
 
-    async def get_order(self, contract: ContractModel, order_id: int) -> OrderModel:
+    async def get_order(self, symbol: Symbol, order_id: int) -> OrderModel:
         """
         Check an order's status.
         """
         params = {
             'timestamp': int(time.time() * 1000),
-            'symbol': contract.symbol,
+            'symbol': symbol,
             'orderId': order_id,
         }
         body = await self._request('GET', '/fapi/v1/order', params, signed=True) or {}

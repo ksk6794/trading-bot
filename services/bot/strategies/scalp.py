@@ -11,12 +11,13 @@ class ScalpStrategy(BaseStrategy):
     name = 'scalp'
     trailing_callback_rate = Decimal('0.002')
     stop_loss = StopLossConfig(
-        rate=Decimal('0.015'),
+        rate=Decimal('0.02'),
     )
     take_profit = TakeProfitConfig(
         steps=[
-            {'level': Decimal('0.005'), 'stake': Decimal('0.5')},
-            {'level': Decimal('0.008'), 'stake': Decimal('0.5')},
+            {'level': Decimal('0.005'), 'stake': Decimal('0.2')},
+            {'level': Decimal('0.010'), 'stake': Decimal('0.4')},
+            {'level': Decimal('0.015'), 'stake': Decimal('0.4')},
         ]
     )
     balance_stake = Decimal('0.1')
@@ -30,19 +31,11 @@ class ScalpStrategy(BaseStrategy):
     def check_signal(self, tick_type: TickType):
         self._rsi = self.candles.get_rsi()
         self._stoch = self.candles.get_stochastic()
-        # print(f'PRICE: {self.price};', f'RSI: {self._rsi};', f'STOCH: {self._stoch};')
-
-        for position_side in PositionSide:
-            position = self.storage.get_position(position_side)
-
-            if position:
-                pnl = position.calc_pnl(self.price)
-                print(f'ID: {position.id}; SIDE: {position_side}; PNL: {pnl}')
 
         # LONG
         if (
-                self._rsi and self._rsi <= 40 and
-                self._stoch['%K'] and self._stoch['%D'] and self._stoch['%K'] <= 35 and self._stoch['%D'] <= 35
+                self._rsi and self._rsi <= 30 and
+                self._stoch['%K'] and self._stoch['%D'] and self._stoch['%K'] <= 25 and self._stoch['%D'] <= 25
         ):
             position = self.storage.get_position(PositionSide.LONG)
 
@@ -70,8 +63,8 @@ class ScalpStrategy(BaseStrategy):
 
         # SHORT
         if (
-                self._rsi and self._rsi >= 60 and
-                self._stoch['%K'] and self._stoch['%D'] and self._stoch['%K'] >= 65 and self._stoch['%D'] >= 65
+                self._rsi and self._rsi >= 70 and
+                self._stoch['%K'] and self._stoch['%D'] and self._stoch['%K'] >= 75 and self._stoch['%D'] >= 75
         ):
             position = self.storage.get_position(PositionSide.SHORT)
 

@@ -4,11 +4,11 @@ from typing import List, Dict, Optional
 
 from pydantic import BaseModel, validator
 
+from helpers import remove_exponent
 from modules.models.types import (
     PositionId, OrderId, ClientOrderId, Timestamp, Symbol, Asset,
     OrderStatus, OrderType, OrderSide, PositionSide
 )
-from helpers import remove_exponent
 
 
 class AccountBalanceModel(BaseModel):
@@ -213,6 +213,15 @@ class OrderModel(BaseModel):
     @property
     def is_filled(self):
         return self.status == OrderStatus.FILLED
+
+    @property
+    def is_processed(self):
+        return self.status in (
+            OrderStatus.FILLED,
+            OrderStatus.CANCELED,
+            OrderStatus.REJECTED,
+            OrderStatus.CANCELED
+        )
 
     @classmethod
     def from_binance(cls, data):
