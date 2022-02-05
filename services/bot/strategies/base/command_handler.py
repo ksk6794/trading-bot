@@ -6,6 +6,7 @@ from time import time
 from typing import Optional, Callable, Dict, Set
 
 from orderedset import OrderedSet
+from expiringdict import ExpiringDict
 
 from modules.mongo import MongoClient
 from modules.models import PositionModel, OrderModel, BookUpdateModel
@@ -37,7 +38,10 @@ class CommandHandler:
         self.price: Optional[BookUpdateModel] = None
 
         self._commands: OrderedSet[Command] = OrderedSet()
-        self._waiting: Dict[ClientOrderId, PlaceOrder] = {}
+        self._waiting: ExpiringDict[ClientOrderId, PlaceOrder] = ExpiringDict(
+            max_len=2,
+            max_age_seconds=30
+        )
         self._callbacks: Dict[str, Set[Callable]] = {}
         self._loop = asyncio.get_event_loop()
         self._queue: asyncio.Queue[OrderModel] = asyncio.Queue()
