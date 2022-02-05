@@ -201,18 +201,18 @@ class CommandHandler:
         if order.side is entry_side:
             # Calculate avg position entry price
             entry_orders = self.storage.get_orders(position.id, entry_side)
+            total_price = sum([order.quantity * order.entry_price for order in entry_orders])
             total_quantity = sum([order.quantity for order in entry_orders])
-            entry_price = sum([order.quantity * order.entry_price for order in entry_orders]) / total_quantity
-            position.entry_price = entry_price
+            position.entry_price = total_price / total_quantity
             position.quantity += order.quantity
             position.total_quantity += order.quantity
 
         else:
             # Calculate avg position exit price
             exit_orders = self.storage.get_orders(position.id, exit_side)
+            total_price = sum([order.quantity * order.entry_price for order in exit_orders])
             total_quantity = sum([order.quantity for order in exit_orders])
-            exit_price = sum([order.quantity * order.entry_price for order in exit_orders]) / total_quantity
-            position.exit_price = exit_price
+            position.exit_price = total_price / total_quantity
             position.quantity -= order.quantity
 
             # Close position
