@@ -141,9 +141,9 @@ class CommandHandler:
         if not order.is_processed:
             return
 
-        cur_order = await self.db.get(OrderModel, query={'id': order.id})
+        exists = await self.db.count(OrderModel, query={'id': order.id})
 
-        if cur_order:
+        if exists:
             return
 
         position = self.storage.get_position(order.position_side)
