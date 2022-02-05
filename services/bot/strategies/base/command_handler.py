@@ -156,7 +156,7 @@ class CommandHandler:
             order.context = command.context
 
         order.position_id = position.id
-        await self.db.upsert(order, query={'id': order.id})
+        await self.db.create(order, query={'id': order.id})
 
         if order.is_filled:
             logging.info(f'Order filled! '
