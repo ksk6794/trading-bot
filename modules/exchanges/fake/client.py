@@ -29,7 +29,7 @@ class FakeUserStream:
         pass
 
     def add_update_callback(self, entity: UserStreamEntity, cb: Callable):
-        self._callbacks[entity].add(cb)
+        self._callbacks.setdefault(entity, set()).add(cb)
 
     async def trigger_callbacks(self, entity: UserStreamEntity, model):
         callbacks = self._callbacks.get(entity, set())
@@ -70,13 +70,7 @@ class FakeExchangeClient(BaseExchangeClient, ABC):
         self._margin_type: Dict[Symbol, MarginType] = {symbol: MarginType.ISOLATED for symbol in self.SYMBOLS}
         self._hedge_mode = True
 
-        self._assets: Dict[Asset, AccountBalanceModel] = {
-            asset: AccountBalanceModel(
-                asset=asset,
-                wallet_balance=balance,
-            )
-            for asset, balance in self.ASSETS.items()
-        }
+        self._assets: Dict[Asset, Decimal] = {**self.ASSETS}
         self._positions: Dict[Symbol, AccountPositionModel] = {
             symbol: AccountPositionModel(
                 symbol=symbol,
@@ -88,10 +82,18 @@ class FakeExchangeClient(BaseExchangeClient, ABC):
             ) for symbol, side in product(self.SYMBOLS, PositionSide)
         }
 
+    def set_price(self, price: BookUpdateModel):
+        self._book = price
+
     async def get_account_info(self) -> AccountModel:
         return AccountModel(
-            assets=self._assets,
-            positions=self._positions,
+            assets={
+                asset: AccountBalanceModel(
+                    asset=asset,
+                    wallet_balance=balance,
+                ) for asset, balance in self._assets.items()
+            },
+            positions=list(self._positions.values()),
         )
 
     async def get_contracts(self) -> Dict[Symbol, ContractModel]:
@@ -134,8 +136,9 @@ class FakeExchangeClient(BaseExchangeClient, ABC):
             order_type: OrderType,
             quantity: Decimal,
             order_side: OrderSide,
+            position_side: PositionSide = PositionSide.BOTH,
             price: Decimal = None,
-            tif: Optional[TimeInForce] = None
+            tif: Optional[TimeInForce] = None,
     ) -> OrderModel:
         assert contract.symbol in self._positions
 
@@ -147,13 +150,6 @@ class FakeExchangeClient(BaseExchangeClient, ABC):
         amount = book_price * quantity
         fee_stake = self._get_fee_stake(order_type)
         commission = amount * fee_stake
-
-        # set base asset
-        account = AccountBalanceModel(
-            asset=contract.base_asset,
-            wallet_balance=Decimal('0'),
-        )
-        self._assets.setdefault(contract.base_asset, account)
 
         if order_side is OrderSide.BUY:
             # quote asset decreasing
@@ -171,21 +167,26 @@ class FakeExchangeClient(BaseExchangeClient, ABC):
 
         model = AccountModel(
             assets={
-                **self._assets[contract.quote_asset],
-                **self._assets[contract.base_asset],
+                asset: AccountBalanceModel(
+                    asset=asset,
+                    wallet_balance=balance,
+                )
+                for asset, balance in self._assets.items()
             },
-            positions=self._positions
+            positions=list(self._positions.values())
         )
         await self.user_stream.trigger_callbacks(UserStreamEntity.ACCOUNT_UPDATE, model)
 
         order = OrderModel(
             id=order_id,
+            client_order_id=client_order_id,
             symbol=contract.symbol,
             quantity=quantity,
-            entry_price=amount,
+            entry_price=book_price,
             status=OrderStatus.FILLED,
             type=order_type,
             side=order_side,
+            position_side=position_side,
             timestamp=int(time.time() * 1000),
         )
         self._orders[order_id] = order
@@ -199,10 +200,10 @@ class FakeExchangeClient(BaseExchangeClient, ABC):
         return self._orders[order_id]
 
     def _get_fee_stake(self, order_type: OrderType):
-        if order_type in (OrderType.LIMIT,):
+        if order_type == OrderType.LIMIT:
             fee = self.MAKER_FEE
 
-        elif order_type in (OrderType.MARKET,):
+        elif order_type == OrderType.MARKET:
             fee = self.TAKER_FEE
 
         else:

@@ -33,19 +33,19 @@ class ReplayClient:
         self.replay_from = replay_from
         self.replay_to = replay_to
 
-        self._started = False
+        self._connected = False
         self._loop = asyncio.get_event_loop()
         self._callbacks: Dict[str, Set] = {}
         self._update_callbacks: Dict[StreamEntity, Set[Callable]] = {}
 
-    async def start(self):
-        if not self._started:
+    async def connect(self):
+        if not self._connected:
             self._loop.create_task(self._reader())
-            self._started = True
+            self._connected = True
 
-    async def stop(self):
-        if self._started:
-            self._started = False
+    async def disconnect(self):
+        if self._connected:
+            self._connected = False
             self._loop.stop()
 
     def add_update_callback(self, entity: StreamEntity, cb: LineCallback):

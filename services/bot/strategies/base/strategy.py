@@ -58,7 +58,7 @@ class BaseStrategy(metaclass=abc.ABCMeta):
 
         if settings.replay:
             logging.warning('*** The strategy is processing historical data! ***')
-            self.exchange = FakeExchangeClient(settings.symbol)
+            self.exchange = FakeExchangeClient()
             self.user_stream = self.exchange.user_stream
             self.line = ReplayClient(
                 db=self.db,
@@ -126,7 +126,7 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         self._ready.set()
 
     async def stop(self):
-        await self.line.stop()
+        await self.line.disconnect()
         await self._trigger_callbacks('stop')
         self.command_handler.stop()
         self._loop.stop()
@@ -243,9 +243,13 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         )
         self.depth.set_snapshot(depth)
 
-    def _on_book_update(self, model: BookUpdateModel):
+    async def _on_book_update(self, model: BookUpdateModel):
         self.price = model
-        self.command_handler.set_price(self.price)
+        self.command_handler.set_price(model)
+
+        if self.settings.replay:
+            # TODO: !!!
+            self.exchange.set_price(model)
 
         if not self._ready.is_set():
             return
@@ -269,7 +273,9 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         # if self.command_handler.has_outgoing_commands:
         #     self.command_handler.execute()
 
-    def _on_trade_update(self, model: TradeUpdateModel):
+        await asyncio.sleep(0)
+
+    async def _on_trade_update(self, model: TradeUpdateModel):
         if not self._ready.is_set():
             return
 
@@ -298,6 +304,8 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         # Execute commands
         # if self.command_handler.has_outgoing_commands:
         #     self.command_handler.execute()
+
+        await asyncio.sleep(0)
 
     async def _on_depth_update(self, model: DepthUpdateModel):
         if not self._ready.is_set():

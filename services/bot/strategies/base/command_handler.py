@@ -115,7 +115,8 @@ class CommandHandler:
         )
 
         if order:
-            order = await self._wait_for_processed(order)
+            if not order.is_processed:
+                order = await self._wait_for_processed(order)
             await self._queue.put(order)
 
     async def _execute_commands(self):

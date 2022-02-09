@@ -27,7 +27,7 @@ class BaseLineClient:
         self.subscriber = LineSubscriber(uri)
         self._entities = entities
         self._last_alive = None
-        self._started = False
+        self._connected = False
         self._callbacks: Dict[str, Set] = {}
         self._models = {
             StreamEntity.TRADE: TradeUpdateModel,
@@ -40,15 +40,15 @@ class BaseLineClient:
         self.subscriber.add_update_callback(self._on_update)
 
     async def connect(self):
-        if not self._started:
+        if not self._connected:
             await self.subscriber.connect()
             await self._subscribe()
-            self._started = True
+            self._connected = True
 
-    async def stop(self):
-        if self._started:
+    async def disconnect(self):
+        if self._connected:
             await self.subscriber.disconnect()
-            self._started = False
+            self._connected = False
             self._loop.stop()
 
     def add_update_callback(self, entity: StreamEntity, cb: Callable):
