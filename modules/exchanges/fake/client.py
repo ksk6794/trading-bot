@@ -198,7 +198,7 @@ class FakeExchangeClient(BaseExchangeClient, ABC):
 
         return order
 
-    async def cancel_order(self, contract: ContractModel, order_id: OrderId):
+    async def cancel_order(self, symbol: Symbol, order_id: OrderId):
         pass
 
     async def get_order(self, contract: ContractModel, order_id: OrderId) -> OrderModel:

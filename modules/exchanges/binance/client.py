@@ -51,11 +51,11 @@ class BinanceClient(BaseExchangeClient):
         body = await self._request('GET', '/fapi/v1/exchangeInfo')
         return {contract['symbol']: ContractModel.from_binance(contract) for contract in body['symbols']}
 
-    async def get_funding_rate(self, contract: ContractModel) -> Dict[Symbol, FundingRateModel]:
+    async def get_funding_rate(self, symbol: Symbol) -> Dict[Symbol, FundingRateModel]:
         """
         Mark Price and Funding Rate
         """
-        params = {'symbol': contract.symbol}
+        params = {'symbol': symbol}
         body = await self._request('GET', '/fapi/v1/premiumIndex', params)
         return FundingRateModel.from_binance(body)
 
@@ -184,13 +184,13 @@ class BinanceClient(BaseExchangeClient):
         if body:
             return OrderModel.from_binance(body)
 
-    async def cancel_order(self, contract: ContractModel, order_id: int):
+    async def cancel_order(self, symbol: Symbol, order_id: int):
         """
         Cancel an active order.
         """
         params = {
             'timestamp': int(time.time() * 1000),
-            'symbol': contract.symbol,
+            'symbol': symbol,
             'orderId': order_id,
         }
         body = await self._request('DELETE', '/fapi/v1/order', params, signed=True) or {}
