@@ -59,13 +59,13 @@ class BinanceClient(BaseExchangeClient):
         body = await self._request('GET', '/fapi/v1/premiumIndex', params)
         return FundingRateModel.from_binance(body)
 
-    async def change_leverage(self, contract: ContractModel, leverage: int):
+    async def change_leverage(self, symbol: Symbol, leverage: int):
         """
         Change user's initial leverage of specific symbol market.
         """
         assert 10 >= leverage > 0
         params = {
-            'symbol': contract.symbol,
+            'symbol': symbol,
             'leverage': leverage,
             'timestamp': int(time.time() * 1000)
         }
@@ -89,9 +89,9 @@ class BinanceClient(BaseExchangeClient):
         if not res:
             raise OperationFailed()
 
-    async def change_margin_type(self, contract: ContractModel, margin_type: MarginType):
+    async def change_margin_type(self, symbol: Symbol, margin_type: MarginType):
         params = {
-            'symbol': contract.symbol,
+            'symbol': symbol,
             'marginType': margin_type,
             'timestamp': int(time.time() * 1000)
         }

@@ -1,51 +1,91 @@
+import inspect
 import logging
 import os
 import random
 import time
+from abc import ABC
 from decimal import Decimal
-from typing import Dict, Optional, List
+from itertools import product
+from typing import Dict, Optional, List, Set, Callable
 
 import orjson
 
 from modules.models import ContractModel, CandleModel, AccountModel, OrderModel, BookUpdateModel, DepthModel
-from modules.models.exchange import AccountBalanceModel, AccountPositionModel
+from modules.models.exchange import AccountBalanceModel, AccountPositionModel, FundingRateModel
 from modules.models.types import (
     Symbol, Timeframe, Asset, OrderType, OrderSide, TimeInForce,
-    OrderId, OrderStatus, PositionSide
+    OrderId, OrderStatus, PositionSide, UserStreamEntity, MarginType
 )
 from modules.exchanges.base import BaseExchangeClient
 
+__all__ = ('FakeExchangeClient',)
 
-class FakeExchangeClient(BaseExchangeClient):
+
+class _FakeUserStream:
+    def __init__(self):
+        self._callbacks: Dict[UserStreamEntity, Set] = {}
+
+    async def connect(self):
+        pass
+
+    def add_update_callback(self, entity: UserStreamEntity, cb: Callable):
+        self._callbacks[entity].add(cb)
+
+    async def trigger_callbacks(self, entity: UserStreamEntity, model):
+        callbacks = self._callbacks.get(entity, set())
+
+        for callback in callbacks:
+            result = callback(model)
+
+            if inspect.isawaitable(result):
+                await result
+
+
+class FakeExchangeClient(BaseExchangeClient, ABC):
     # https://www.binance.com/en/fee/futureFee
     MAKER_FEE = Decimal('0.0002')  # 0.02% for ≥ 0 BNB
     TAKER_FEE = Decimal('0.0004')  # 0.04% for ≥ 0 BNB
 
+    ASSETS: Dict[Asset, Decimal] = {
+        Asset('BTC'): Decimal('0.1'),
+        Asset('ETH'): Decimal('1'),
+        Asset('DOT'): Decimal('100'),
+        Asset('USDT'): Decimal('1000')
+    }
+    SYMBOLS: List[Symbol] = [
+        Symbol('BTCUSDT'),
+        Symbol('ETHUSDT'),
+        Symbol('DOTUSDT')
+    ]
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+        self.user_stream = _FakeUserStream()
 
         # Initial state
         self._book: Optional[BookUpdateModel] = None
         self._orders: Dict[OrderId, OrderModel] = {}
+        self._leverage: Dict[Symbol: int] = {symbol: 1 for symbol in self.SYMBOLS}
+        self._margin_type: Dict[Symbol, MarginType] = {symbol: MarginType.ISOLATED for symbol in self.SYMBOLS}
+        self._hedge_mode = True
 
-        self._balances = {
-            Asset('USDT'): AccountBalanceModel(
-                asset=Asset('USDT'),
-                wallet_balance=Decimal('1000'),
+        self._assets: Dict[Asset, AccountBalanceModel] = {
+            asset: AccountBalanceModel(
+                asset=asset,
+                wallet_balance=balance,
             )
+            for asset, balance in self.ASSETS.items()
         }
-        self._positions = {
-            Symbol('BTCUSDT'): AccountPositionModel(
-                symbol=Symbol('BTCUSDT'),
-                side=PositionSide.BOTH,
+        self._positions: Dict[Symbol, AccountPositionModel] = {
+            symbol: AccountPositionModel(
+                symbol=symbol,
+                side=side,
                 quantity=Decimal('0'),
                 entry_price=Decimal('0'),
-                leverage=2,
+                leverage=1,
                 isolated=True,
-            ),
-            Symbol('ETHUSDT'): AccountPositionModel(
-                symbol=Symbol('ETHUSDT'),
-            )
+            ) for symbol, side in product(self.SYMBOLS, PositionSide)
         }
 
     async def get_account_info(self) -> AccountModel:
@@ -55,7 +95,7 @@ class FakeExchangeClient(BaseExchangeClient):
                     asset=asset,
                     wallet_balance=free,
                 )
-                for asset, free in self._balances.items()
+                for asset, free in self._assets.items()
             },
             positions=self._positions
         )
@@ -63,6 +103,21 @@ class FakeExchangeClient(BaseExchangeClient):
     async def get_contracts(self) -> Dict[Symbol, ContractModel]:
         symbols = self._read('contracts.json')
         return {contract['symbol']: ContractModel(**contract) for contract in symbols}
+
+    async def get_funding_rate(self, contract: ContractModel) -> Dict[Symbol, FundingRateModel]:
+        pass
+
+    async def change_leverage(self, symbol: Symbol, leverage: int):
+        self._leverage[symbol] = leverage
+
+    async def is_hedge_mode(self) -> bool:
+        return self._hedge_mode
+
+    async def change_position_mode(self, hedge_mode: bool):
+        self._hedge_mode = hedge_mode
+
+    async def change_margin_type(self, symbol: Symbol, margin_type: MarginType):
+        self._margin_type[symbol] = margin_type
 
     async def get_historical_candles(
             self,
@@ -91,6 +146,7 @@ class FakeExchangeClient(BaseExchangeClient):
         assert contract.symbol in self._positions
 
         # TODO: Implement insufficient balance exception
+        # TODO: Implement positions updates
         # TODO: Emulate LIMIT orders placing
         order_id = OrderId(random.randint(10000000, 1000000000))
         book_price = self._book.get_price(order_side)
@@ -99,21 +155,34 @@ class FakeExchangeClient(BaseExchangeClient):
         commission = amount * fee_stake
 
         # set base asset
-        self._balances.setdefault(contract.base_asset, Decimal('0'))
+        account = AccountBalanceModel(
+            asset=contract.base_asset,
+            wallet_balance=Decimal('0'),
+        )
+        self._assets.setdefault(contract.base_asset, account)
 
         if order_side is OrderSide.BUY:
             # quote asset decreasing
-            self._balances[contract.quote_asset] -= (amount + commission)
+            self._assets[contract.quote_asset] -= (amount + commission)
 
             # base asset increasing
-            self._balances[contract.base_asset] += quantity
+            self._assets[contract.base_asset] += quantity
 
         elif order_side is OrderSide.SELL:
             # quote asset increasing
-            self._balances[contract.quote_asset] += (amount - commission)
+            self._assets[contract.quote_asset] += (amount - commission)
 
             # base asset decreasing
-            self._balances[contract.base_asset] -= quantity
+            self._assets[contract.base_asset] -= quantity
+
+        model = AccountModel(
+            assets={
+                **self._assets[contract.quote_asset],
+                **self._assets[contract.base_asset],
+            },
+            positions=self._positions
+        )
+        await self.user_stream.trigger_callbacks(UserStreamEntity.ACCOUNT_UPDATE, model)
 
         order = OrderModel(
             id=order_id,

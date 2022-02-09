@@ -34,8 +34,8 @@ class ScalpStrategy(BaseStrategy):
 
         # LONG
         if (
-                self._rsi and self._rsi <= 30 and
-                self._stoch['%K'] and self._stoch['%D'] and self._stoch['%K'] <= 25 and self._stoch['%D'] <= 25
+                self._rsi and self._rsi <= 25 and
+                self._stoch['%K'] and self._stoch['%D'] and self._stoch['%K'] <= 20 and self._stoch['%D'] <= 20
         ):
             position = self.storage.get_position(PositionSide.LONG)
 
@@ -63,8 +63,8 @@ class ScalpStrategy(BaseStrategy):
 
         # SHORT
         if (
-                self._rsi and self._rsi >= 70 and
-                self._stoch['%K'] and self._stoch['%D'] and self._stoch['%K'] >= 75 and self._stoch['%D'] >= 75
+                self._rsi and self._rsi >= 75 and
+                self._stoch['%K'] and self._stoch['%D'] and self._stoch['%K'] >= 80 and self._stoch['%D'] >= 80
         ):
             position = self.storage.get_position(PositionSide.SHORT)
 

@@ -31,7 +31,7 @@ class BaseExchangeClient(metaclass=abc.ABCMeta):
         ...
 
     @abc.abstractmethod
-    async def change_leverage(self, contract: ContractModel, leverage: int):
+    async def change_leverage(self, symbol: Symbol, leverage: int):
         """
         Change user's initial leverage of specific symbol market.
         """
@@ -52,7 +52,7 @@ class BaseExchangeClient(metaclass=abc.ABCMeta):
         ...
 
     @abc.abstractmethod
-    async def change_margin_type(self, contract: ContractModel, margin_type: MarginType):
+    async def change_margin_type(self, symbol: Symbol, margin_type: MarginType):
         ...
 
     @abc.abstractmethod

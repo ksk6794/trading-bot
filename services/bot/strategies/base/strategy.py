@@ -9,13 +9,14 @@ from typing import Optional, Set, Callable, List, Dict, Any
 
 from helpers import remove_exponent, to_decimal_places
 from modules.models.commands import TrailingStop, PlaceOrder
+from modules.models.exchange import AccountPositionModel, AccountBalanceModel
 
 from modules.mongo import MongoClient
 from modules.models import ContractModel, OrderModel, PositionModel, AccountModel
 from modules.models.line import TradeUpdateModel, BookUpdateModel, DepthUpdateModel
 from modules.models.types import (
     PositionStatus, OrderSide, StreamEntity, UserStreamEntity,
-    PositionSide, TickType, Timestamp
+    PositionSide, TickType, Timestamp, Asset
 )
 from modules.models.strategy import StopLossConfig, TakeProfitConfig
 from modules.models.indexes import INDEXES
@@ -57,7 +58,8 @@ class BaseStrategy(metaclass=abc.ABCMeta):
 
         if settings.replay:
             logging.warning('*** The strategy is processing historical data! ***')
-            self.exchange = FakeExchangeClient()
+            self.exchange = FakeExchangeClient(settings.symbol)
+            self.user_stream = self.exchange.user_stream
             self.line = ReplayClient(
                 db=self.db,
                 symbol=settings.symbol,
@@ -73,14 +75,14 @@ class BaseStrategy(metaclass=abc.ABCMeta):
                 private_key=settings.binance_private_key,
                 testnet=settings.binance_testnet,
             )
+            self.user_stream = BinanceUserStreamClient(
+                exchange=self.exchange,
+                testnet=settings.binance_testnet,
+            )
             self.line = LineClient(
                 symbol=settings.symbol,
                 uri=settings.broker_amqp_uri,
                 entities=settings.entities,
-            )
-            self.user_stream = BinanceUserStreamClient(
-                exchange=self.exchange,
-                testnet=settings.binance_testnet,
             )
 
         self._ready = asyncio.Event()
@@ -98,7 +100,7 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         )
         self.contract: Optional[ContractModel] = None
         self.price: Optional[BookUpdateModel] = None
-        self.account: Optional[AccountModel] = None
+        self.assets: Dict[Asset, AccountBalanceModel] = {}
 
         self.line.add_update_callback(StreamEntity.BOOK, self._on_book_update)
         self.line.add_update_callback(StreamEntity.TRADE, self._on_trade_update)
@@ -212,11 +214,11 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         self.command_handler.append(command)
 
     def calc_trade_quantity(self, balance_stake: Decimal, order_side: OrderSide) -> Optional[Decimal]:
-        if not (self.price and self.contract and self.account):
+        if not (self.price and self.contract and self.assets):
             return
 
         price = self.price.bid if order_side is OrderSide.BUY else self.price.ask
-        balance = self.account.assets[self.contract.quote_asset].wallet_balance
+        balance = self.assets[self.contract.quote_asset].wallet_balance
         quantity = balance * balance_stake * self.settings.leverage / price
         quantity = remove_exponent(round(quantity / self.contract.lot_size) * self.contract.lot_size)
 
@@ -307,8 +309,7 @@ class BaseStrategy(metaclass=abc.ABCMeta):
 
     async def _on_account_update(self, model: AccountModel):
         for asset, balance in model.assets.items():
-            self.account.assets[asset] = balance
-        self.account.positions = model.positions
+            self.assets[asset] = balance
 
     def check_stop_loss(self, position: PositionModel):
         if not self.stop_loss:
@@ -409,9 +410,13 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         await self.user_stream.connect()
 
     async def _preload_data(self):
-        contracts = await self.exchange.get_contracts()
+        contracts, account = await asyncio.gather(
+            self.exchange.get_contracts(),
+            self.exchange.get_account_info(),
+        )
+
         self.contract = contracts[self.settings.symbol]
-        self.account = await self.exchange.get_account_info()
+        self.assets = account.assets
 
         if self.settings.candles_limit:
             candles = await self.exchange.get_historical_candles(
@@ -424,10 +429,10 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         if self.settings.depth_limit:
             await self._set_gap_snapshot()
 
-        await self._set_positions()
+        await self._set_positions(account.positions)
 
-    async def _set_positions(self):
-        positions: List[PositionModel] = await self.db.find(
+    async def _set_positions(self, positions: List[AccountPositionModel]):
+        db_positions_list: List[PositionModel] = await self.db.find(
             model=PositionModel,
             query={
                 'symbol': self.settings.symbol,
@@ -435,24 +440,24 @@ class BaseStrategy(metaclass=abc.ABCMeta):
                 'status': PositionStatus.OPEN,
             }
         )
-        account_positions = {
+        acc_positions = {
             position.side: position
-            for position in self.account.positions
+            for position in positions
             if position.symbol == self.settings.symbol and position.quantity > 0
         }
-        db_positions = {position.side: position for position in positions}
+        db_positions = {position.side: position for position in db_positions_list}
         actual_positions = []
 
-        for side in set(account_positions) & set(db_positions):
+        for side in set(acc_positions) & set(db_positions):
             db_position = db_positions[side]
-            acc_position = account_positions[side]
+            acc_position = acc_positions[side]
             db_position_price = to_decimal_places(db_position.entry_price, self.contract.lot_size)
             acc_position_price = to_decimal_places(acc_position.entry_price, self.contract.lot_size)
 
             if db_position_price == acc_position_price and db_position.quantity == acc_position.quantity:
                 actual_positions.append(db_position)
 
-        if len(actual_positions) != len(account_positions):
+        if len(actual_positions) != len(acc_positions):
             raise RuntimeError('Unknown position found!')
 
         orders: List[OrderModel] = await self.db.find(
@@ -472,7 +477,7 @@ class BaseStrategy(metaclass=abc.ABCMeta):
             await self.exchange.change_position_mode(hedge_mode=True)
 
     async def _configure_leverage(self):
-        await self.exchange.change_leverage(self.contract, self.settings.leverage)
+        await self.exchange.change_leverage(self.contract.symbol, self.settings.leverage)
 
     def _check_delay(self, timestamp: Timestamp):
         if not self.settings.replay:
