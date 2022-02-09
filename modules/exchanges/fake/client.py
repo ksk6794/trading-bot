@@ -21,7 +21,7 @@ from modules.exchanges.base import BaseExchangeClient
 __all__ = ('FakeExchangeClient',)
 
 
-class _FakeUserStream:
+class FakeUserStream:
     def __init__(self):
         self._callbacks: Dict[UserStreamEntity, Set] = {}
 
@@ -50,18 +50,18 @@ class FakeExchangeClient(BaseExchangeClient, ABC):
         Asset('BTC'): Decimal('0.1'),
         Asset('ETH'): Decimal('1'),
         Asset('DOT'): Decimal('100'),
-        Asset('USDT'): Decimal('1000')
+        Asset('USDT'): Decimal('1000'),
     }
     SYMBOLS: List[Symbol] = [
         Symbol('BTCUSDT'),
         Symbol('ETHUSDT'),
-        Symbol('DOTUSDT')
+        Symbol('DOTUSDT'),
     ]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.user_stream = _FakeUserStream()
+        self.user_stream = FakeUserStream()
 
         # Initial state
         self._book: Optional[BookUpdateModel] = None
@@ -90,14 +90,8 @@ class FakeExchangeClient(BaseExchangeClient, ABC):
 
     async def get_account_info(self) -> AccountModel:
         return AccountModel(
-            assets={
-                asset: AccountBalanceModel(
-                    asset=asset,
-                    wallet_balance=free,
-                )
-                for asset, free in self._assets.items()
-            },
-            positions=self._positions
+            assets=self._assets,
+            positions=self._positions,
         )
 
     async def get_contracts(self) -> Dict[Symbol, ContractModel]:
