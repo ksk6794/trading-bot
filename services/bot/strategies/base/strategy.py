@@ -58,8 +58,7 @@ class BaseStrategy(metaclass=abc.ABCMeta):
 
         if settings.replay:
             logging.warning('*** The strategy is processing historical data! ***')
-            self.exchange = FakeExchangeClient()
-            self.user_stream = self.exchange.user_stream
+
             self.line = ReplayClient(
                 db=self.db,
                 symbol=settings.symbol,
@@ -67,9 +66,16 @@ class BaseStrategy(metaclass=abc.ABCMeta):
                 replay_from=settings.replay_from,
                 replay_to=settings.replay_to,
             )
-            self.line.add_done_callback(self.stop)
+            self.line.add_done_callback(self._replay_summary)
+            self.exchange = FakeExchangeClient(self.line)
+            self.user_stream = self.exchange.user_stream
 
         else:
+            self.line = LineClient(
+                symbol=settings.symbol,
+                uri=settings.broker_amqp_uri,
+                entities=settings.entities,
+            )
             self.exchange = BinanceClient(
                 public_key=settings.binance_public_key,
                 private_key=settings.binance_private_key,
@@ -78,11 +84,6 @@ class BaseStrategy(metaclass=abc.ABCMeta):
             self.user_stream = BinanceUserStreamClient(
                 exchange=self.exchange,
                 testnet=settings.binance_testnet,
-            )
-            self.line = LineClient(
-                symbol=settings.symbol,
-                uri=settings.broker_amqp_uri,
-                entities=settings.entities,
             )
 
         self._ready = asyncio.Event()
@@ -122,14 +123,16 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         await self._configure_mode()
         await self._configure_leverage()
         await self._trigger_callbacks('start')
-        self.command_handler.start()
         self._ready.set()
 
     async def stop(self):
         await self.line.disconnect()
         await self._trigger_callbacks('stop')
-        self.command_handler.stop()
         self._loop.stop()
+
+    async def _replay_summary(self):
+        # TODO: Implement summary!
+        await self.stop()
 
     @abc.abstractmethod
     def check_signal(self, tick_type: TickType):
@@ -218,6 +221,11 @@ class BaseStrategy(metaclass=abc.ABCMeta):
             return
 
         price = self.price.bid if order_side is OrderSide.BUY else self.price.ask
+
+        if price <= 0:
+            logging.warning('Abnormal price during calc quantity!')
+            return
+
         balance = self.assets[self.contract.quote_asset].wallet_balance
         quantity = balance * balance_stake * self.settings.leverage / price
         quantity = remove_exponent(round(quantity / self.contract.lot_size) * self.contract.lot_size)
@@ -225,7 +233,7 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         if quantity * price < self.contract.min_notional:
             logging.error(f'"calc_trade_quantity": The quantity is too small! '
                           f'quote_asset={self.contract.quote_asset}; '
-                          f'base_asset={self.contract.base_asset}'
+                          f'base_asset={self.contract.base_asset}; '
                           f'balance={balance}; '
                           f'balance_stake={balance_stake}; '
                           f'quantity={quantity}; '
@@ -247,19 +255,12 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         self.price = model
         self.command_handler.set_price(model)
 
-        if self.settings.replay:
-            # TODO: !!!
-            self.exchange.set_price(model)
-
         if not self._ready.is_set():
             return
 
-        if self.command_handler.is_pending:
-            return
-
         # Execute commands (trailing)
-        if self.command_handler.has_outgoing_commands and not self.command_handler.is_pending:
-            self.command_handler.execute()
+        if self.command_handler.has_outgoing_commands:
+            await self.command_handler.execute()
             return
 
         for position_side in PositionSide.values():
@@ -273,24 +274,23 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         # if self.command_handler.has_outgoing_commands:
         #     self.command_handler.execute()
 
-        await asyncio.sleep(0)
-
     async def _on_trade_update(self, model: TradeUpdateModel):
         if not self._ready.is_set():
             return
 
-        self._check_delay(model.timestamp)
+        skip = self._check_delay(model.timestamp)
+
+        if skip:
+            return
+
         tick_type = self.candles.update(model)
 
         if not self.price:
             return
 
-        if self.command_handler.is_pending:
-            return
-
         # Execute commands (trailing)
-        if self.command_handler.has_outgoing_commands and not self.command_handler.is_pending:
-            self.command_handler.execute()
+        if self.command_handler.has_outgoing_commands:
+            await self.command_handler.execute()
             return
 
         interval = self.settings.signal_check_interval
@@ -305,13 +305,15 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         # if self.command_handler.has_outgoing_commands:
         #     self.command_handler.execute()
 
-        await asyncio.sleep(0)
-
     async def _on_depth_update(self, model: DepthUpdateModel):
         if not self._ready.is_set():
             return
 
-        self._check_delay(model.timestamp)
+        skip = self._check_delay(model.timestamp)
+
+        if skip:
+            return
+
         self.depth.update(model)
         await asyncio.sleep(0)  # to prevent loop locks
 
@@ -487,17 +489,22 @@ class BaseStrategy(metaclass=abc.ABCMeta):
     async def _configure_leverage(self):
         await self.exchange.change_leverage(self.contract.symbol, self.settings.leverage)
 
-    def _check_delay(self, timestamp: Timestamp):
+    def _check_delay(self, timestamp: Timestamp) -> bool:
+        skip = False
+
         if not self.settings.replay:
             diff = time() * 1000 - timestamp
             exchange_name = self.exchange.__class__.__name__
 
             if diff >= 2000:
                 logging.warning(f'{exchange_name}: Messages processing delay of {diff / 1000}s!')
+                skip = True
 
-            if diff >= 10000:
+            if diff >= 12000:
                 logging.error('Stopping the program due to critical delay!')
                 self._loop.create_task(self.stop())
+
+            return skip
 
     async def _trigger_callbacks(self, action: Any, *args, **kwargs):
         callbacks = self._callbacks.get(action, set())

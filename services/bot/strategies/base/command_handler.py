@@ -44,25 +44,11 @@ class CommandHandler:
         )
         self._callbacks: Dict[str, Set[Callable]] = {}
         self._loop = asyncio.get_event_loop()
-        self._queue: asyncio.Queue[OrderModel] = asyncio.Queue()
-        self._pending = False
-        self._started = False
 
-        self.user_stream.add_update_callback(UserStreamEntity.ORDER_TRADE_UPDATE, self._queue.put)
+        self.user_stream.add_update_callback(UserStreamEntity.ORDER_TRADE_UPDATE, self._update_order)
 
     def __len__(self):
         return len(self._commands)
-
-    def start(self):
-        self._started = True
-        self._loop.create_task(self._queue_fetcher())
-
-    def stop(self):
-        self._started = False
-
-    @property
-    def is_pending(self) -> bool:
-        return bool(self._pending or self._waiting)
 
     @property
     def has_outgoing_commands(self) -> bool:
@@ -77,12 +63,21 @@ class CommandHandler:
     def set_price(self, price: BookUpdateModel):
         self.price = price
 
-    def execute(self):
-        if self._pending or not self._commands:
+    async def execute(self):
+        if not self._commands:
             return
 
-        self._pending = True
-        self._loop.call_soon(lambda: self._loop.create_task(self._execute_commands()))
+        next_commands = OrderedSet()
+
+        for command in self._commands:
+            while command:
+                command = await self.handle(command)
+
+                if command and command.next_time:
+                    next_commands.add(command)
+                    break
+
+        self._commands = next_commands
 
     @method_dispatch  # pragma: no cover
     async def handle(self, command: Command, **kwargs) -> Optional[Command]:
@@ -117,30 +112,7 @@ class CommandHandler:
         if order:
             if not order.is_processed:
                 order = await self._wait_for_processed(order)
-            await self._queue.put(order)
-
-    async def _execute_commands(self):
-        next_commands = OrderedSet()
-
-        for command in self._commands:
-            while command:
-                command = await self.handle(command)
-
-                if command and command.next_time:
-                    next_commands.add(command)
-                    break
-
-        self._commands = next_commands
-        self._pending = False
-
-    async def _queue_fetcher(self):
-        while self._started:
-            try:
-                order = await self._queue.get()
-                await self._update_order(order)
-
-            except Exception as err:
-                logging.exception(err)
+            await self._update_order(order)
 
     async def _update_order(self, order: OrderModel):
         if not order.is_processed:

@@ -10,11 +10,12 @@ from typing import Dict, Optional, List, Set, Callable
 
 import orjson
 
+from modules.line_client import ReplayClient
 from modules.models import ContractModel, CandleModel, AccountModel, OrderModel, BookUpdateModel, DepthModel
 from modules.models.exchange import AccountBalanceModel, AccountPositionModel, FundingRateModel
 from modules.models.types import (
     Symbol, Timeframe, Asset, OrderType, OrderSide, TimeInForce,
-    OrderId, OrderStatus, PositionSide, UserStreamEntity, MarginType
+    OrderId, OrderStatus, PositionSide, UserStreamEntity, MarginType, StreamEntity
 )
 from modules.exchanges.base import BaseExchangeClient
 
@@ -58,8 +59,11 @@ class FakeExchangeClient(BaseExchangeClient, ABC):
         Symbol('DOTUSDT'),
     ]
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, line: ReplayClient, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+        self.line = line
+        self.line.add_update_callback(StreamEntity.BOOK, self._on_book_update)
 
         self.user_stream = FakeUserStream()
 
@@ -81,9 +85,6 @@ class FakeExchangeClient(BaseExchangeClient, ABC):
                 isolated=True,
             ) for symbol, side in product(self.SYMBOLS, PositionSide)
         }
-
-    def set_price(self, price: BookUpdateModel):
-        self._book = price
 
     async def get_account_info(self) -> AccountModel:
         return AccountModel(
@@ -218,3 +219,6 @@ class FakeExchangeClient(BaseExchangeClient, ABC):
 
         with open(path, encoding='utf-8') as f:
             return orjson.loads(f.read())
+
+    def _on_book_update(self, model: BookUpdateModel):
+        self._book = model

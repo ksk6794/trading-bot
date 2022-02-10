@@ -8,7 +8,7 @@ from typing import Dict, Optional, List, NoReturn
 
 import orjson
 from yarl import URL
-from aiohttp import ClientSession, ClientResponseError
+from aiohttp import ClientSession, ClientResponseError, ClientTimeout
 
 from modules.exchanges.base import BaseExchangeClient
 from modules.exchanges.exceptions import OperationFailed
@@ -33,7 +33,8 @@ class BinanceClient(BaseExchangeClient):
         api_url = 'https://testnet.binancefuture.com' if testnet else 'https://fapi.binance.com'
 
         self._session = ClientSession(
-            json_serialize=lambda x: orjson.dumps(x).decode()
+            json_serialize=lambda x: orjson.dumps(x).decode(),
+            timeout=ClientTimeout(total=10)
         )
         self._base_url = URL(api_url)
         self._public_key = public_key

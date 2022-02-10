@@ -20,7 +20,7 @@ class ScalpStrategy(BaseStrategy):
             {'level': Decimal('0.015'), 'stake': Decimal('0.4')},
         ]
     )
-    balance_stake = Decimal('0.1')
+    balance_stake = Decimal('0.25')
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

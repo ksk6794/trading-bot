@@ -50,6 +50,10 @@ class TrailingStop(Command):
         triggered = False
         precision = self.contract.price_decimals
 
+        if price.bid <= 0 or price.ask <= 0:
+            logging.warning('Abnormal price during trailing!')
+            return triggered
+
         if self.order_side == OrderSide.BUY:
             if (price.bid + self.stop_size) < self.stop_loss:
                 self.price = price
