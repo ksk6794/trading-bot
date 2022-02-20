@@ -4,6 +4,7 @@ import inspect
 import logging
 from decimal import Decimal
 from itertools import chain
+from pprint import pprint
 from time import time
 from typing import Optional, Set, Callable, List, Dict, Any
 
@@ -98,6 +99,7 @@ class BaseStrategy(metaclass=abc.ABCMeta):
             user_stream=self.user_stream,
             storage=self.storage,
             strategy=self.name,
+            symbol=self.settings.symbol,
         )
         self.contract: Optional[ContractModel] = None
         self.price: Optional[BookUpdateModel] = None
@@ -270,9 +272,9 @@ class BaseStrategy(metaclass=abc.ABCMeta):
                 self.check_stop_loss(position)
                 self.check_take_profit(position)
 
-        # Execute commands
-        # if self.command_handler.has_outgoing_commands:
-        #     self.command_handler.execute()
+                # Execute commands
+                if self.command_handler.has_outgoing_commands:
+                    await self.command_handler.execute()
 
     async def _on_trade_update(self, model: TradeUpdateModel):
         if not self._ready.is_set():
@@ -297,15 +299,15 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         diff = model.timestamp - self._last_signal_check
 
         # Limit signal check to interval
-        if (diff >= interval * 1000) or tick_type is TickType.NEW_CANDLE:
+        if (interval is not None and diff >= interval * 1000) or tick_type is TickType.NEW_CANDLE:
             self.check_signal(tick_type)
             self._last_signal_check = model.timestamp
 
-        # Execute commands
-        # if self.command_handler.has_outgoing_commands:
-        #     self.command_handler.execute()
+            # Execute commands
+            if self.command_handler.has_outgoing_commands:
+                await self.command_handler.execute()
 
-    async def _on_depth_update(self, model: DepthUpdateModel):
+    def _on_depth_update(self, model: DepthUpdateModel):
         if not self._ready.is_set():
             return
 
@@ -315,11 +317,12 @@ class BaseStrategy(metaclass=abc.ABCMeta):
             return
 
         self.depth.update(model)
-        await asyncio.sleep(0)  # to prevent loop locks
 
-    async def _on_account_update(self, model: AccountModel):
+    def _on_account_update(self, model: AccountModel):
         for asset, balance in model.assets.items():
             self.assets[asset] = balance
+
+        pprint(self.assets)
 
     def check_stop_loss(self, position: PositionModel):
         if not self.stop_loss:
@@ -339,6 +342,8 @@ class BaseStrategy(metaclass=abc.ABCMeta):
             triggered = price >= trigger
 
         if triggered:
+            pnl = position.calc_pnl(self.price)
+            print(f'PNL: {pnl}')
             logging.warning(f'Stop loss triggered! '
                             f'position_id={position.id}; '
                             f'trigger={trigger}; '
@@ -378,6 +383,8 @@ class BaseStrategy(metaclass=abc.ABCMeta):
             triggered = self.price.ask <= position.entry_price * (1 - step.level)
 
         if triggered and order_side:
+            pnl = position.calc_pnl(self.price)
+            print(f'PNL: {pnl}')
             logging.info(f'Take profit level {step.level} reached! '
                          f'position_id={position.id}')
             quantity = position.total_quantity * step.stake
@@ -504,7 +511,7 @@ class BaseStrategy(metaclass=abc.ABCMeta):
                 logging.error('Stopping the program due to critical delay!')
                 self._loop.create_task(self.stop())
 
-            return skip
+        return skip
 
     async def _trigger_callbacks(self, action: Any, *args, **kwargs):
         callbacks = self._callbacks.get(action, set())

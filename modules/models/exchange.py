@@ -40,13 +40,18 @@ class AccountPositionModel(BaseModel):
     quantity: Decimal
     entry_price: Decimal
     isolated: bool
+    margin: Decimal
 
-    @validator('entry_price', always=True)
+    @validator('entry_price', always=True, pre=True)
     def validate_entry_price(cls, value):
         return remove_exponent(value)
 
-    @validator('quantity', always=True)
+    @validator('quantity', always=True, pre=True)
     def validate_quantity(cls, value):
+        return remove_exponent(abs(value))
+
+    @validator('margin', always=True, pre=True)
+    def validate_margin(cls, value):
         return remove_exponent(abs(value))
 
     @classmethod
@@ -57,6 +62,7 @@ class AccountPositionModel(BaseModel):
             quantity=data['positionAmt'],
             entry_price=data['entryPrice'],
             isolated=data['isolated'],
+            margin=data['isolatedWallet'],
         )
 
     @classmethod
@@ -67,7 +73,24 @@ class AccountPositionModel(BaseModel):
             quantity=data['pa'],
             entry_price=data['ep'],
             isolated=data['mt'] == 'isolated',
+            margin=data['iw'],
         )
+
+    def calc_pnl(self, price, quantity: Optional[Decimal] = None) -> Decimal:
+        pnl = Decimal('0')
+
+        if quantity > self.quantity:
+            raise RuntimeError('Invalid quantity!')
+
+        quantity = quantity or self.quantity
+
+        if self.side is PositionSide.LONG:
+            pnl = (price.bid - self.entry_price) * quantity
+
+        elif self.side == PositionSide.SHORT:
+            pnl = (self.entry_price - price.ask) * quantity
+
+        return pnl
 
 
 class AccountModel(BaseModel):

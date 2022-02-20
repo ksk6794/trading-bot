@@ -22,7 +22,9 @@ class Settings(BaseSettings):
     depth_limit: int = 100
     leverage: conint(ge=1, le=25) = 1
 
-    signal_check_interval: Optional[int] = 10  # in seconds, 0 - no limits
+    # In seconds, 0 - no limits, None - don't check by interval.
+    # The more often checks - the slower processing!
+    signal_check_interval: Optional[int]
     trailing_callback_rate: Optional[Decimal]
 
     replay: bool = False

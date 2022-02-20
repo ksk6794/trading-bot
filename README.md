@@ -37,3 +37,5 @@ docker exec -it <container_id> mongodb mongodb://root:1111@localhost
 **Portainer:** http://localhost:9000
 
 **RabbitMQ Management:** http://localhost:15672
+
+**MongoDB Express:** http://localhost:8081

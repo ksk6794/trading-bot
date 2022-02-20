@@ -1,11 +1,12 @@
 import asyncio
 import inspect
 import logging
-from typing import List, Optional, Set, Callable
+import uuid
+from typing import List, Optional, Set, Callable, Dict
 
 import orjson
 import aio_pika
-from aio_pika import IncomingMessage, Exchange, Queue, Channel
+from aio_pika import Exchange, Queue, Channel
 from aio_pika.connection import Connection
 from aio_pika.exceptions import IncompatibleProtocolError
 
@@ -24,6 +25,7 @@ class AMQPConsumer:
 
         self._loop = asyncio.get_event_loop()
         self._callbacks: Set[Callable] = set()
+        self._consumer_task: Optional[asyncio.Task] = None
 
     async def connect(self):
         while not self._connection:
@@ -50,6 +52,9 @@ class AMQPConsumer:
             await self._channel.close()
         await self._connection.close()
 
+        if self._consumer_task:
+            self._consumer_task.cancel()
+
     async def setting_up(self):
         self._channel = await self._connection.channel()
         self._exchange = await self._channel.declare_exchange(
@@ -66,20 +71,23 @@ class AMQPConsumer:
                 routing_key=routing_key
             )
 
-        await self._queue.consume(
-            callback=self._callback,
-            exclusive=True,
-        )
+        self._consumer_task = asyncio.create_task(self._consume())
 
     def add_message_callback(self, cb: Callable):
         self._callbacks.add(cb)
 
-    async def _callback(self, message: IncomingMessage):
-        body = orjson.loads(message.body)
-        action = body['action']
-        payload = body.get('payload')
-        await self._trigger_callbacks(self._callbacks, action, payload)
-        message.ack()
+    async def _consume(self):
+        async with self._queue.iterator() as queue_iter:
+            async for message in queue_iter:
+                async with message.process():
+                    try:
+                        body = orjson.loads(message.body)
+                        action = body['action']
+                        payload = body.get('payload')
+                        await self._trigger_callbacks(self._callbacks, action, payload)
+
+                    except Exception as err:
+                        logging.exception('Exception during message processing: %r', err)
 
     @staticmethod
     async def _trigger_callbacks(callbacks, *args, **kwargs):

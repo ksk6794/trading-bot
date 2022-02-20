@@ -28,13 +28,15 @@ class CommandHandler:
             exchange: BinanceClient,
             user_stream: BinanceUserStreamClient,
             storage: LocalStorage,
-            strategy: str
+            strategy: str,
+            symbol: Symbol,
     ):
         self.db = db
         self.exchange = exchange
         self.user_stream = user_stream
         self.storage = storage
         self.strategy = strategy
+        self.symbol = symbol
         self.price: Optional[BookUpdateModel] = None
 
         self._commands: OrderedSet[Command] = OrderedSet()
@@ -46,6 +48,7 @@ class CommandHandler:
         self._loop = asyncio.get_event_loop()
 
         self.user_stream.add_update_callback(UserStreamEntity.ORDER_TRADE_UPDATE, self._update_order)
+        # self.user_stream.add_update_callback(UserStreamEntity.ACCOUNT_UPDATE, self._on_account_update)
 
     def __len__(self):
         return len(self._commands)
@@ -115,6 +118,9 @@ class CommandHandler:
             await self._update_order(order)
 
     async def _update_order(self, order: OrderModel):
+        if order.symbol != self.symbol:
+            return
+
         if not order.is_processed:
             return
 
@@ -127,7 +133,7 @@ class CommandHandler:
         command = self._waiting.pop(order.client_order_id, None)
 
         if not position:
-            position = await self._create_position(order.symbol, order.position_side)
+            position = await self._create_position(order.position_side)
 
         if command and command.context:
             order.context = command.context
@@ -146,18 +152,18 @@ class CommandHandler:
 
     async def _create_position(
             self,
-            symbol: Symbol,
             position_side: PositionSide,
     ) -> PositionModel:
         # Create position
         position = PositionModel(
             id=PositionId(uuid4().hex),
-            symbol=symbol,
+            symbol=self.symbol,
             side=position_side,
             strategy=self.strategy,
             status=PositionStatus.OPEN,
             quantity=Decimal('0'),
             total_quantity=Decimal('0'),
+            margin=Decimal('0'),
             entry_price=Decimal('0'),
             exit_price=Decimal('0'),
             orders=[],

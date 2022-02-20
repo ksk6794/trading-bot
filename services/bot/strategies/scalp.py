@@ -9,9 +9,9 @@ from .base import BaseStrategy
 class ScalpStrategy(BaseStrategy):
     # Base strategy configuration
     name = 'scalp'
-    trailing_callback_rate = Decimal('0.002')
+    trailing_callback_rate = Decimal('0.001')
     stop_loss = StopLossConfig(
-        rate=Decimal('0.02'),
+        rate=Decimal('0.025'),
     )
     take_profit = TakeProfitConfig(
         steps=[
@@ -34,8 +34,8 @@ class ScalpStrategy(BaseStrategy):
 
         # LONG
         if (
-                self._rsi and self._rsi <= 25 and
-                self._stoch['%K'] and self._stoch['%D'] and self._stoch['%K'] <= 20 and self._stoch['%D'] <= 20
+                self._rsi and self._rsi <= 35 and
+                self._stoch['%K'] and self._stoch['%D'] and self._stoch['%K'] <= 40 and self._stoch['%D'] <= 40
         ):
             position = self.storage.get_position(PositionSide.LONG)
 
@@ -63,8 +63,8 @@ class ScalpStrategy(BaseStrategy):
 
         # SHORT
         if (
-                self._rsi and self._rsi >= 75 and
-                self._stoch['%K'] and self._stoch['%D'] and self._stoch['%K'] >= 80 and self._stoch['%D'] >= 80
+                self._rsi and self._rsi >= 65 and
+                self._stoch['%K'] and self._stoch['%D'] and self._stoch['%K'] >= 60 and self._stoch['%D'] >= 60
         ):
             position = self.storage.get_position(PositionSide.SHORT)
 
