@@ -37,7 +37,7 @@ class AMQPConsumer:
                 )
 
             except ConnectionError as err:
-                logging.error(err)
+                logging.error('AMQPConsumer: %r', err)
 
             except IncompatibleProtocolError:
                 pass

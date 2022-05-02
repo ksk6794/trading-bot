@@ -34,7 +34,7 @@ class AMQPPublisher:
                 )
 
             except ConnectionError as err:
-                logging.error(err)
+                logging.error('AMQPPublisher: %r', err)
 
             except IncompatibleProtocolError:
                 pass
