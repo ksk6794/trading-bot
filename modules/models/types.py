@@ -55,6 +55,7 @@ class StreamEntity(AutoName):
 @unique
 class UserStreamEntity(AutoNameUp):
     ACCOUNT_UPDATE = auto()
+    ACCOUNT_CONFIG_UPDATE = auto()
     ORDER_TRADE_UPDATE = auto()
 
 
@@ -90,6 +91,7 @@ class OrderType(AutoNameUp):
     TAKE_PROFIT = auto()
     TAKE_PROFIT_MARKET = auto()
     TRAILING_STOP_MARKET = auto()
+    LIQUIDATION = auto()
 
 
 @unique

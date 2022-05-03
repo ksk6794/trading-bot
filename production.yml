@@ -95,7 +95,7 @@ services:
     restart: always
 
   rabbitmq:
-    image: "rabbitmq:management"
+    image: "rabbitmq:3-management"
     environment:
       - DEFAULT_USER=guest
       - DEFAULT_PASS=guest

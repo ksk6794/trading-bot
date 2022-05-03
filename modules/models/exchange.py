@@ -42,15 +42,15 @@ class AccountPositionModel(BaseModel):
     isolated: bool
     margin: Decimal
 
-    @validator('entry_price', always=True, pre=True)
+    @validator('entry_price', always=True)
     def validate_entry_price(cls, value):
         return remove_exponent(value)
 
-    @validator('quantity', always=True, pre=True)
+    @validator('quantity', always=True)
     def validate_quantity(cls, value):
         return remove_exponent(abs(value))
 
-    @validator('margin', always=True, pre=True)
+    @validator('margin', always=True)
     def validate_margin(cls, value):
         return remove_exponent(abs(value))
 
@@ -109,6 +109,18 @@ class AccountModel(BaseModel):
         return cls(
             assets={i['a']: AccountBalanceModel.from_user_stream(i) for i in data['a']['B']},
             positions=[AccountPositionModel.from_user_stream(i) for i in data['a']['P']]
+        )
+
+
+class AccountConfigModel(BaseModel):
+    symbol: Symbol
+    leverage: int
+
+    @classmethod
+    def from_user_stream(cls, data: Dict):
+        return cls(
+            symbol=data['ac']['s'],
+            leverage=data['ac']['l'],
         )
 
 

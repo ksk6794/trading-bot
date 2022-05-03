@@ -15,6 +15,7 @@ from modules.models.line import BookUpdateModel, TradeUpdateModel, DepthUpdateMo
 from modules.models.types import Symbol, StreamEntity, UserStreamEntity
 
 from .client import BinanceClient
+from ...models.exchange import AccountConfigModel
 
 
 class BinanceStreamClient(BaseExchangeStreamClient):
@@ -160,6 +161,11 @@ class BinanceUserStreamClient:
             if raw_entity == 'ACCOUNT_UPDATE':
                 entity = UserStreamEntity.ACCOUNT_UPDATE
                 model = AccountModel.from_user_stream(payload)
+                await self._trigger_callbacks(entity, model)
+
+            elif raw_entity == 'ACCOUNT_CONFIG_UPDATE':
+                entity = UserStreamEntity.ACCOUNT_CONFIG_UPDATE
+                model = AccountConfigModel.from_user_stream(payload)
                 await self._trigger_callbacks(entity, model)
 
             elif raw_entity == 'ORDER_TRADE_UPDATE':

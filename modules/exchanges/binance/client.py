@@ -70,9 +70,12 @@ class BinanceClient(BaseExchangeClient):
             'leverage': leverage,
             'timestamp': int(time.time() * 1000)
         }
+        logging.info('BinanceClient: configuring leverage...')
         res = await self._request('POST', '/fapi/v1/leverage', params, signed=True)
 
-        if not res:
+        if res:
+            logging.info('BinanceClient: leverage configured!')
+        else:
             raise OperationFailed()
 
     async def is_hedge_mode(self):

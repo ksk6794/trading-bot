@@ -4,7 +4,6 @@ import inspect
 import logging
 from decimal import Decimal
 from itertools import chain
-from pprint import pprint
 from time import time
 from typing import Optional, Set, Callable, List, Dict, Any
 
@@ -13,7 +12,7 @@ from modules.models.commands import TrailingStop, PlaceOrder
 from modules.models.exchange import AccountPositionModel, AccountBalanceModel
 
 from modules.mongo import MongoClient
-from modules.models import ContractModel, OrderModel, PositionModel, AccountModel
+from modules.models import ContractModel, OrderModel, PositionModel, AccountModel, AccountConfigModel
 from modules.models.line import TradeUpdateModel, BookUpdateModel, DepthUpdateModel
 from modules.models.types import (
     PositionStatus, OrderSide, StreamEntity, UserStreamEntity,
@@ -55,7 +54,7 @@ class BaseStrategy(metaclass=abc.ABCMeta):
             self.depth = Depth(
                 limit=settings.depth_limit,
             )
-            self.depth.add_gap_callback(self._set_gap_snapshot)
+            self.depth.add_gap_callback(self._set_depth_snapshot)
 
         if settings.replay:
             logging.warning('*** The strategy is processing historical data! ***')
@@ -110,6 +109,7 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         self.line.add_update_callback(StreamEntity.DEPTH, self._on_depth_update)
 
         self.user_stream.add_update_callback(UserStreamEntity.ACCOUNT_UPDATE, self._on_account_update)
+        self.user_stream.add_update_callback(UserStreamEntity.ACCOUNT_CONFIG_UPDATE, self._on_account_config_update)
 
     def add_start_callback(self, cb: Callable):
         assert asyncio.iscoroutinefunction(cb)
@@ -123,7 +123,6 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         await self._prepare_resources()
         await self._preload_data()
         await self._configure_mode()
-        await self._configure_leverage()
         await self._trigger_callbacks('start')
         self._ready.set()
 
@@ -246,7 +245,7 @@ class BaseStrategy(metaclass=abc.ABCMeta):
 
         return quantity
 
-    async def _set_gap_snapshot(self):
+    async def _set_depth_snapshot(self):
         depth = await self.exchange.get_depth(
             symbol=self.settings.symbol,
             limit=self.settings.depth_limit,
@@ -322,7 +321,12 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         for asset, balance in model.assets.items():
             self.assets[asset] = balance
 
-        pprint(self.assets)
+        str_assets = '; '.join([f'{a.asset}={a.wallet_balance}' for a in self.assets.values()])
+        logging.info('Account updated! %s', str_assets)
+
+    @staticmethod
+    def _on_account_config_update(model: AccountConfigModel):
+        logging.info('Account config updated! symbol=%s; leverage=%d', model.symbol, model.leverage)
 
     def check_stop_loss(self, position: PositionModel):
         if not self.stop_loss:
@@ -444,7 +448,7 @@ class BaseStrategy(metaclass=abc.ABCMeta):
             self.candles.set_snapshot(candles)
 
         if self.settings.depth_limit:
-            await self._set_gap_snapshot()
+            await self._set_depth_snapshot()
 
         await self._set_positions(account.positions)
 
@@ -457,15 +461,20 @@ class BaseStrategy(metaclass=abc.ABCMeta):
                 'status': PositionStatus.OPEN,
             }
         )
+        db_positions = {
+            position.side: position
+            for position in db_positions_list
+        }
         acc_positions = {
             position.side: position
             for position in positions
-            if position.symbol == self.settings.symbol and position.quantity > 0
+            if position.symbol == self.settings.symbol
         }
-        db_positions = {position.side: position for position in db_positions_list}
+        cur_positions = [position for position in positions if position.quantity > 0]
         actual_positions = []
 
-        for side in set(acc_positions) & set(db_positions):
+        # Match positions
+        for side in set(db_positions) & set(acc_positions):
             db_position = db_positions[side]
             acc_position = acc_positions[side]
             db_position_price = to_decimal_places(db_position.entry_price, self.contract.lot_size)
@@ -474,14 +483,21 @@ class BaseStrategy(metaclass=abc.ABCMeta):
             if db_position_price == acc_position_price and db_position.quantity == acc_position.quantity:
                 actual_positions.append(db_position)
 
-        if len(actual_positions) != len(acc_positions):
+        # Check for unknown positions
+        if len(actual_positions) != len(cur_positions):
             raise RuntimeError('Unknown position found!')
+
+        if not actual_positions:
+            await self._configure_leverage()
 
         orders: List[OrderModel] = await self.db.find(
             model=OrderModel,
             query={
                 'order_id': {
-                    '$in': list(chain.from_iterable([position.orders for position in actual_positions]))
+                    '$in': list(chain.from_iterable([
+                        position.orders
+                        for position in actual_positions
+                    ]))
                 }
             }
         )

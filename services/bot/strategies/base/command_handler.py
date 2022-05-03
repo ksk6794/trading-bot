@@ -9,7 +9,7 @@ from orderedset import OrderedSet
 from expiringdict import ExpiringDict
 
 from modules.mongo import MongoClient
-from modules.models import PositionModel, OrderModel, BookUpdateModel
+from modules.models import PositionModel, OrderModel, BookUpdateModel, AccountModel
 from modules.exchanges import BinanceClient, BinanceUserStreamClient
 from modules.models.commands import Command, TrailingStop, PlaceOrder
 from modules.models.types import (
@@ -48,7 +48,6 @@ class CommandHandler:
         self._loop = asyncio.get_event_loop()
 
         self.user_stream.add_update_callback(UserStreamEntity.ORDER_TRADE_UPDATE, self._update_order)
-        # self.user_stream.add_update_callback(UserStreamEntity.ACCOUNT_UPDATE, self._on_account_update)
 
     def __len__(self):
         return len(self._commands)
