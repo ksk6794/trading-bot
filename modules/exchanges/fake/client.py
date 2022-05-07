@@ -188,7 +188,8 @@ class FakeExchangeClient(BaseExchangeClient, ABC):
 
             # quote asset increasing
             pnl = position.calc_pnl(self._book, quantity)
-            # TODO: calc with avg_leverage!
+            # TODO: calc with avg_leverage?
+            # avg_leverage = position.quantity * price / position.margin
             self._assets[contract.quote_asset] += position.margin * quantity / position.quantity + pnl - commission
 
             # base asset decreasing

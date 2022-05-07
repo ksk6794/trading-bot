@@ -1,4 +1,4 @@
-FROM python:3.8-slim-buster
+FROM python:3.10-slim-buster
 RUN apt-get update && apt-get install bash python3-dev gdal-bin build-essential libssl-dev libffi-dev -y
 
 WORKDIR /service
