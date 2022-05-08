@@ -255,7 +255,7 @@ class OrderModel(BaseModel):
             OrderStatus.FILLED,
             OrderStatus.CANCELED,
             OrderStatus.REJECTED,
-            OrderStatus.CANCELED
+            OrderStatus.EXPIRED
         )
 
     @classmethod

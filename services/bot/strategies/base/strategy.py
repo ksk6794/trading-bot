@@ -329,6 +329,8 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         logging.info('Account config updated! symbol=%s; leverage=%d', model.symbol, model.leverage)
 
     def check_stop_loss(self, position: PositionModel):
+        triggered = False
+
         if not self.stop_loss:
             return
 
@@ -340,14 +342,12 @@ class BaseStrategy(metaclass=abc.ABCMeta):
             trigger = position.entry_price * (1 - self.stop_loss.rate)
             triggered = price <= trigger
 
-        else:
+        elif position.side is PositionSide.SHORT:
             price = self.price.ask
             trigger = position.entry_price * (1 + self.stop_loss.rate)
             triggered = price >= trigger
 
         if triggered:
-            pnl = position.calc_pnl(self.price)
-            print(f'PNL: {pnl}')
             logging.warning(f'Stop loss triggered! '
                             f'position_id={position.id}; '
                             f'trigger={trigger}; '
@@ -387,8 +387,6 @@ class BaseStrategy(metaclass=abc.ABCMeta):
             triggered = self.price.ask <= position.entry_price * (1 - step.level)
 
         if triggered and order_side:
-            pnl = position.calc_pnl(self.price)
-            print(f'PNL: {pnl}')
             logging.info(f'Take profit level {step.level} reached! '
                          f'position_id={position.id}')
             quantity = position.total_quantity * step.stake

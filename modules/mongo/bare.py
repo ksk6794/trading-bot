@@ -2,6 +2,7 @@ import copy
 import decimal
 from typing import List, Dict, Optional, Tuple, Type
 
+import pymongo
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel
 from pymongo.client_session import ClientSession
@@ -106,6 +107,25 @@ class BareMongoClient:  # pragma: no cover
         collection = self._get_collection(model)
         data = self._convert(self._to_document(model))
         return await collection.replace_one(query, data, session=session)
+
+    async def partial_update(
+            self,
+            model: Type[BaseModel],
+            update_fields: Dict,
+            query: Dict,
+            session: Optional[ClientSession] = None
+    ):
+        collection = self._get_collection(model)
+        fields = {'$set': self._convert(update_fields)}
+        res = await collection.find_one_and_update(
+            filter=query,
+            update=fields,
+            return_document=pymongo.ReturnDocument.AFTER,
+            session=session,
+        )
+
+        if res:
+            return self._to_model(model, res)
 
     async def upsert(
             self,

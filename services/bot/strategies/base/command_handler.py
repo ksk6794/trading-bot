@@ -9,7 +9,7 @@ from orderedset import OrderedSet
 from expiringdict import ExpiringDict
 
 from modules.mongo import MongoClient
-from modules.models import PositionModel, OrderModel, BookUpdateModel, AccountModel
+from modules.models import PositionModel, OrderModel, BookUpdateModel
 from modules.exchanges import BinanceClient, BinanceUserStreamClient
 from modules.models.commands import Command, TrailingStop, PlaceOrder
 from modules.models.types import (
@@ -120,33 +120,38 @@ class CommandHandler:
         if order.symbol != self.symbol:
             return
 
-        if not order.is_processed:
-            return
+        count = await self.db.count(OrderModel, query={'id': order.id})
 
-        exists = await self.db.count(OrderModel, query={'id': order.id})
+        if not count:
+            command = self._waiting.pop(order.client_order_id, None)
+            order.context = command.context if command and command.context else None
+            await self.db.create(order)
 
-        if exists:
-            return
-
-        position = self.storage.get_position(order.position_side)
-        command = self._waiting.pop(order.client_order_id, None)
-
-        if not position:
-            position = await self._create_position(order.position_side)
-
-        if command and command.context:
-            order.context = command.context
-
-        order.position_id = position.id
-        await self.db.create(order)
+        else:
+            await self.db.partial_update(
+                model=OrderModel,
+                update_fields=order.dict(exclude_none=True),
+                query={'id': order.id}
+            )
 
         if order.is_filled:
+            self.storage.add_order(order)
+            position = self.storage.get_position(order.position_side)
+
+            if not position:
+                position = await self._create_position(order.position_side)
+                await self.db.partial_update(
+                    model=OrderModel,
+                    update_fields={'position_id': position.id},
+                    query={'id': order.id}
+                )
+
             logging.info(f'Order filled! '
                          f'position_id={position.id}; '
                          f'side={order.side}; '
                          f'quantity={order.quantity}; '
                          f'price={order.entry_price};')
-            self.storage.add_order(order)
+
             await self._update_position(position, order)
 
     async def _create_position(
