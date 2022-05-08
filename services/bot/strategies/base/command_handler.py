@@ -158,7 +158,6 @@ class CommandHandler:
             self,
             position_side: PositionSide,
     ) -> PositionModel:
-        # Create position
         position = PositionModel(
             id=PositionId(uuid4().hex),
             symbol=self.symbol,
@@ -175,6 +174,7 @@ class CommandHandler:
         )
         await self.db.create(position)
         self.storage.set_position(position)
+
         logging.info(f'Position created! '
                      f'position_id={position.id};')
 
