@@ -128,23 +128,23 @@ class CommandHandler:
             await self.db.create(order)
 
         else:
-            await self.db.partial_update(
+            order = await self.db.partial_update(
                 model=OrderModel,
                 update_fields=order.dict(exclude_none=True),
                 query={'id': order.id}
             )
 
         if order.is_filled:
-            self.storage.add_order(order)
             position = self.storage.get_position(order.position_side)
 
             if not position:
                 position = await self._create_position(order.position_side)
-                await self.db.partial_update(
+                order = await self.db.partial_update(
                     model=OrderModel,
                     update_fields={'position_id': position.id},
                     query={'id': order.id}
                 )
+                self.storage.add_order(order)
 
             logging.info(f'Order filled! '
                          f'position_id={position.id}; '
