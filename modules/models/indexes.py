@@ -48,11 +48,11 @@ INDEXES = {
         IndexModel(
             keys=[
                 ('symbol', ASCENDING),
-                ('strategy', ASCENDING),
+                ('strategy_id', ASCENDING),
                 ('status', ASCENDING),
                 ('timestamp', ASCENDING)
             ],
-            name='symbol__strategy__status__timestamp__index'
+            name='symbol__strategy_id__status__timestamp__index'
         ),
     ],
 }

@@ -10,15 +10,134 @@ import orjson
 from yarl import URL
 from aiohttp import ClientSession, ClientResponseError, ClientTimeout
 
-from modules.exchanges.base import BaseExchangeClient
+from modules.exchanges.base import BaseExchangeClient, BaseExchangeUserClient
 from modules.exchanges.exceptions import OperationFailed
 from modules.models.types import OrderSide, OrderType, TimeInForce, Symbol, Timeframe, MarginType, PositionSide
-from modules.models import AccountModel, FundingRateModel, CandleModel, ContractModel, OrderModel, DepthModel
+from modules.models import AccountModel, FundingRateModel, CandleModel, ContractModel, OrderModel, DepthModel, BookUpdateModel
 
 from helpers import remove_exponent, date_to_milliseconds, to_decimal_places
 
 
-class BinanceClient(BaseExchangeClient):
+# noinspection PyUnresolvedReferences
+class BinanceRequestMixin:
+    async def _request(
+            self,
+            method: str,
+            endpoint: str,
+            params: Optional[Dict] = None,
+            signed: bool = False,
+            **kwargs
+    ):
+        headers = {}
+
+        if signed:
+            headers['X-MBX-APIKEY'] = self._public_key
+
+            if params:
+                params['signature'] = self._sign(params)
+
+        try:
+            async with self._session.request(
+                    method=method,
+                    url=self._base_url.with_path(endpoint),
+                    headers=headers,
+                    params=params,
+                    **kwargs
+            ) as resp:
+                if resp.status == 200:
+                    body = await resp.json()
+                    return body
+
+                elif resp.status in (400, 401):
+                    body = await resp.json()
+                    logging.error(
+                        'Bad Request: endpoint="%s"; code=%d; message="%s"',
+                        endpoint, body['code'], body['msg']
+                    )
+
+                else:
+                    logging.error('Server respond with status %d', resp.status)
+
+        except ClientResponseError as err:
+            logging.error(err)
+
+    def _sign(self, data: Dict):
+        return hmac.new(self._private_key.encode(), urlencode(data).encode(), hashlib.sha256).hexdigest()
+
+
+class BinanceClient(BaseExchangeClient, BinanceRequestMixin):
+    def __init__(
+            self,
+            testnet: bool = False,
+    ):
+        super().__init__()
+        api_url = 'https://testnet.binancefuture.com' if testnet else 'https://fapi.binance.com'
+
+        self._session = ClientSession(
+            json_serialize=lambda x: orjson.dumps(x).decode(),
+            timeout=ClientTimeout(total=10)
+        )
+        self._base_url = URL(api_url)
+
+    async def get_contracts(self) -> Dict[Symbol, ContractModel]:
+        """
+        Current exchange trading rules and symbol information
+        """
+        body = await self._request('GET', '/fapi/v1/exchangeInfo')
+        return {contract['symbol']: ContractModel.from_binance(contract) for contract in body['symbols']}
+
+    async def get_funding_rate(self, symbol: Symbol) -> Dict[Symbol, FundingRateModel]:
+        """
+        Mark Price and Funding Rate
+        """
+        params = {'symbol': symbol}
+        body = await self._request('GET', '/fapi/v1/premiumIndex', params)
+        return FundingRateModel.from_binance(body)
+
+    async def get_historical_candles(
+            self,
+            symbol: Symbol,
+            timeframe: Timeframe,
+            limit: int = 1000,
+            start_time: Optional[str] = None,
+    ) -> List[CandleModel]:
+        """
+        Kline/candlestick bars for a symbol.
+        Klines are uniquely identified by their open time.
+        """
+        params = {
+            'symbol': symbol,
+            'interval': timeframe,
+            'limit': limit,
+        }
+
+        if start_time:
+            params['startTime'] = date_to_milliseconds(start_time)
+
+        body = await self._request('GET', '/fapi/v1/klines', params) or []
+        return [CandleModel.from_binance(item) for item in body]
+
+    async def get_book(self) -> Dict[Symbol, BookUpdateModel]:
+        """
+        Best price/qty on the order book for a symbol or symbols.
+        """
+        body = await self._request('GET', '/fapi/v1/ticker/bookTicker')
+        return {item['symbol']: BookUpdateModel.from_binance(item) for item in body}
+
+    async def get_depth(
+            self,
+            symbol: Symbol,
+            limit: int = 1000,
+    ) -> DepthModel:
+        params = {
+            'symbol': symbol,
+            'limit': limit,
+        }
+        body = await self._request('GET', '/fapi/v1/depth', params)
+        return DepthModel.from_binance(body)
+
+
+class BinanceUserClient(BaseExchangeUserClient, BinanceRequestMixin):
     """
     API Doc:
     https://binance-docs.github.io/apidocs/futures/en
@@ -45,21 +164,6 @@ class BinanceClient(BaseExchangeClient):
         body = await self._request('GET', '/fapi/v2/account', params, signed=True)
         return AccountModel.from_binance(body)
 
-    async def get_contracts(self) -> Dict[Symbol, ContractModel]:
-        """
-        Current exchange trading rules and symbol information
-        """
-        body = await self._request('GET', '/fapi/v1/exchangeInfo')
-        return {contract['symbol']: ContractModel.from_binance(contract) for contract in body['symbols']}
-
-    async def get_funding_rate(self, symbol: Symbol) -> Dict[Symbol, FundingRateModel]:
-        """
-        Mark Price and Funding Rate
-        """
-        params = {'symbol': symbol}
-        body = await self._request('GET', '/fapi/v1/premiumIndex', params)
-        return FundingRateModel.from_binance(body)
-
     async def change_leverage(self, symbol: Symbol, leverage: int):
         """
         Change user's initial leverage of specific symbol market.
@@ -70,12 +174,10 @@ class BinanceClient(BaseExchangeClient):
             'leverage': leverage,
             'timestamp': int(time.time() * 1000)
         }
-        logging.info('BinanceClient: configuring leverage...')
+        logging.info(f'BinanceClient: configuring leverage for symbol {symbol}...')
         res = await self._request('POST', '/fapi/v1/leverage', params, signed=True)
 
-        if res:
-            logging.info('BinanceClient: leverage configured!')
-        else:
+        if not res:
             raise OperationFailed()
 
     async def is_hedge_mode(self):
@@ -100,41 +202,6 @@ class BinanceClient(BaseExchangeClient):
             'timestamp': int(time.time() * 1000)
         }
         await self._request('POST', '/fapi/v1/marginType', params)
-
-    async def get_historical_candles(
-            self,
-            symbol: Symbol,
-            timeframe: Timeframe,
-            limit: int = 1000,
-            start_time: Optional[str] = None,
-    ) -> List[CandleModel]:
-        """
-        Kline/candlestick bars for a symbol.
-        Klines are uniquely identified by their open time.
-        """
-        params = {
-            'symbol': symbol,
-            'interval': timeframe,
-            'limit': limit,
-        }
-
-        if start_time:
-            params['startTime'] = date_to_milliseconds(start_time)
-
-        body = await self._request('GET', '/fapi/v1/klines', params) or []
-        return [CandleModel.from_binance(item) for item in body]
-
-    async def get_depth(
-            self,
-            symbol: Symbol,
-            limit: int = 1000,
-    ) -> DepthModel:
-        params = {
-            'symbol': symbol,
-            'limit': limit,
-        }
-        body = await self._request('GET', '/fapi/v1/depth', params)
-        return DepthModel.from_binance(body)
 
     async def place_order(
             self,
@@ -213,40 +280,17 @@ class BinanceClient(BaseExchangeClient):
         return OrderModel.from_binance(body)
 
     async def create_listen_key(self) -> Optional[str]:
+        """
+        Start a new user data stream. The stream will close after 60 minutes unless a keepalive is sent.
+        If the account has an active listenKey, that listenKey will be returned and its validity will be extended
+        for 60 minutes.
+        """
         body = await self._request('POST', '/fapi/v1/listenKey', signed=True) or {}
         return body.get('listenKey')
 
     async def update_listen_key(self) -> NoReturn:
+        """
+        Keepalive a user data stream to prevent a time out. User data streams will close after 60 minutes.
+        It's recommended to send a ping about every 60 minutes.
+        """
         await self._request('PUT', '/fapi/v1/listenKey', signed=True)
-
-    async def _request(self, method: str, endpoint: str, params: Optional[Dict] = None, signed: bool = False, **kwargs):
-        if signed and params:
-            params['signature'] = self._sign(params)
-
-        try:
-            async with self._session.request(
-                    method=method,
-                    url=self._base_url.with_path(endpoint),
-                    headers={'X-MBX-APIKEY': self._public_key},
-                    params=params,
-                    **kwargs
-            ) as resp:
-                if resp.status == 200:
-                    body = await resp.json()
-                    return body
-
-                elif resp.status in (400, 401):
-                    body = await resp.json()
-                    logging.error(
-                        'Bad Request: endpoint="%s"; code=%d; message="%s"',
-                        endpoint, body['code'], body['msg']
-                    )
-
-                else:
-                    logging.error('Server respond with status %d', resp.status)
-
-        except ClientResponseError as err:
-            logging.error(err)
-
-    def _sign(self, data: Dict):
-        return hmac.new(self._private_key.encode(), urlencode(data).encode(), hashlib.sha256).hexdigest()

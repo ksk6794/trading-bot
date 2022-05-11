@@ -1,1 +1,1 @@
-from .strategy import BaseStrategy
+from .strategy import Strategy

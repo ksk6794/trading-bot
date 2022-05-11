@@ -10,7 +10,7 @@ from .technical import TechnicalAnalysis
 
 
 class Candles:
-    def __init__(self, timeframe: Timeframe, candles_limit: int):
+    def __init__(self, timeframe: Timeframe, candles_limit: int = 100):
         self.timeframe_ms = TIMEFRAME_S[timeframe] * 1000
         self._technical = TechnicalAnalysis(timeframe)
         self._candles_limit = candles_limit
@@ -121,6 +121,10 @@ class Candles:
 
         if tick_type:
             self._technical.reset()
+
+        if tick_type is TickType.NEW_CANDLE:
+            if self._technical.df is None:
+                self._technical.build_dataframe(self._raw)
 
         return tick_type
 

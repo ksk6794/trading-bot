@@ -14,7 +14,7 @@ from modules.models import AccountModel, OrderModel
 from modules.models.line import BookUpdateModel, TradeUpdateModel, DepthUpdateModel
 from modules.models.types import Symbol, StreamEntity, UserStreamEntity
 
-from .client import BinanceClient
+from .client import BinanceUserClient
 from ...models.exchange import AccountConfigModel
 
 
@@ -98,7 +98,7 @@ class BinanceUserStreamClient:
 
     def __init__(
             self,
-            exchange: BinanceClient,
+            exchange: BinanceUserClient,
             testnet: bool = False,
     ):
         self._ws_url = URL('wss://stream.binancefuture.com/' if testnet else 'wss://fstream.binance.com/')
@@ -137,7 +137,7 @@ class BinanceUserStreamClient:
 
     async def _key_renewal(self):
         while True:
-            if self._listen_key_exp - time() <= 10 * 60:
+            if self._listen_key_exp - time() <= 45 * 60:
                 logging.info('Updating listen key...')
                 await self._exchange.update_listen_key()
                 self._listen_key_exp = time() + self.KEY_LIFETIME

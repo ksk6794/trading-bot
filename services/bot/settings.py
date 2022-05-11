@@ -1,39 +1,61 @@
 from decimal import Decimal
-from typing import Optional, List
+from typing import Optional, List, Any
 
-from pydantic import BaseSettings, conint, validator
+from pydantic import BaseSettings, conint
+from pydantic.main import BaseModel
+from pydantic.types import condecimal
 
-from modules.models.types import Symbol, Timeframe, Timestamp, StreamEntity
+from modules.models.types import Symbol, PositionSide, OrderSide, Timeframe, Indicator, Condition, StrategyId
 
 
 class Settings(BaseSettings):
     broker_amqp_uri: str
     mongo_uri: str
 
+    candles_limit: int = 100
+    binance_testnet: bool = False
+    symbols: List[Symbol]
+
+    # replay: bool = False
+    # replay_speed: conint(ge=0, le=100) = 0
+    # replay_from: Optional[Timestamp]
+    # replay_to: Optional[Timestamp]
+
+
+class IndicatorParameter(BaseModel):
+    field: str
+    value: Any
+
+
+class IndicatorCondition(BaseModel):
+    field: str
+    condition: Condition
+    value: Decimal
+
+
+class StrategyCondition(BaseModel):
+    position_side: PositionSide
+    order_side: OrderSide
+    timeframe: Timeframe
+    indicator: Indicator
+    parameters: List[IndicatorParameter]
+    conditions: List[IndicatorCondition]
+    save_signal_candles: conint(ge=1, le=10) = 1
+
+
+class StrategyRules(BaseSettings):
+    id: StrategyId
+    name: str
+
     binance_testnet: bool = False
     binance_public_key: Optional[str]
     binance_private_key: Optional[str]
 
-    symbol: Symbol
-    strategy: str
-    timeframe: Timeframe = '1h'
-    entities: List[StreamEntity] = ['trade', 'book', 'depth']
-    candles_limit: int = 100
-    depth_limit: int = 100
+    trailing: bool = False
+    balance_stake: condecimal(gt=Decimal('0'), le=Decimal('1'))
     leverage: conint(ge=1, le=25) = 1
-
-    # In seconds, 0 - no limits, None - don't check by interval.
-    # The more often checks - the slower processing!
-    signal_check_interval: Optional[int]
     trailing_callback_rate: Optional[Decimal]
 
-    replay: bool = False
-    replay_speed: conint(ge=0, le=100) = 0
-    replay_from: Optional[Timestamp]
-    replay_to: Optional[Timestamp]
-
-    @validator('depth_limit', always=True)
-    def validate_depth_limit(cls, value, values) -> int:
-        if StreamEntity.DEPTH not in values['entities']:
-            value = 0
-        return value
+    symbols: List[Symbol]
+    conditions: List[StrategyCondition]
+    conditions_trigger_count: int

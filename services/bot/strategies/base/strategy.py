@@ -4,90 +4,93 @@ import inspect
 import logging
 from decimal import Decimal
 from itertools import chain
-from time import time
-from typing import Optional, Set, Callable, List, Dict, Any
+from typing import Optional, Set, Callable, List, Dict, Any, Tuple
 
 from helpers import remove_exponent, to_decimal_places
 from modules.models.commands import TrailingStop, PlaceOrder
 from modules.models.exchange import AccountPositionModel, AccountBalanceModel
 
 from modules.mongo import MongoClient
-from modules.models import ContractModel, OrderModel, PositionModel, AccountModel, AccountConfigModel
-from modules.models.line import TradeUpdateModel, BookUpdateModel, DepthUpdateModel
+from modules.models import OrderModel, PositionModel, AccountModel, AccountConfigModel
 from modules.models.types import (
-    PositionStatus, OrderSide, StreamEntity, UserStreamEntity,
-    PositionSide, TickType, Timestamp, Asset
+    PositionStatus, OrderSide, UserStreamEntity,
+    PositionSide, Asset, Timeframe, Symbol, Indicator
 )
 from modules.models.strategy import StopLossConfig, TakeProfitConfig
-from modules.models.indexes import INDEXES
-from modules.exchanges import BinanceClient, BinanceUserStreamClient
+from modules.exchanges import BinanceUserClient, BinanceUserStreamClient
 from modules.exchanges.base import BaseExchangeClient
-from modules.exchanges.fake import FakeExchangeClient
-from modules.line_client import LineClient, ReplayClient
 
 from services.bot.strategies.base.command_handler import CommandHandler
 from services.bot.strategies.base.storage import LocalStorage
-from services.bot.settings import Settings
-from services.bot.candles import Candles
-from services.bot.depth import Depth
+from services.bot.state import ExchangeState
+from services.bot.settings import StrategyRules
 
 
-class BaseStrategy(metaclass=abc.ABCMeta):
+class Strategy(metaclass=abc.ABCMeta):
     name: str
     exchange_class: BaseExchangeClient
     stop_loss: Optional[StopLossConfig] = None
     take_profit: Optional[TakeProfitConfig] = None
 
-    def __init__(self, settings: Settings):
-        self.settings = settings
+    def __init__(
+            self,
+            rules: StrategyRules,
+            db: MongoClient,
+            state: ExchangeState,
+    ):
+        self.rules = rules
+        self.db = db
+        self.state = state
 
-        self.db = MongoClient(
-            mongo_uri=settings.mongo_uri,
-            indexes=INDEXES,
+        # if settings.depth_limit:
+        #     self.depth = Depth(
+        #         limit=settings.depth_limit,
+        #     )
+        #     self.depth.add_gap_callback(self._set_depth_snapshot)
+
+        self.exchange = BinanceUserClient(
+            public_key=rules.binance_public_key,
+            private_key=rules.binance_private_key,
+            testnet=rules.binance_testnet,
         )
-        self.candles = Candles(
-            timeframe=settings.timeframe,
-            candles_limit=settings.candles_limit,
+        self.user_stream = BinanceUserStreamClient(
+            exchange=self.exchange,
+            testnet=rules.binance_testnet,
         )
 
-        if settings.depth_limit:
-            self.depth = Depth(
-                limit=settings.depth_limit,
-            )
-            self.depth.add_gap_callback(self._set_depth_snapshot)
+        # if settings.replay:
+        #     logging.warning('*** The strategy is processing historical data! ***')
+        #
+        #     self.line = ReplayClient(
+        #         db=self.db,
+        #         symbol=settings.symbol,
+        #         replay_speed=settings.replay_speed,
+        #         replay_from=settings.replay_from,
+        #         replay_to=settings.replay_to,
+        #     )
+        #     self.line.add_done_callback(self._replay_summary)
+        #     self.exchange = FakeExchangeClient(self.line)
+        #     self.user_stream = self.exchange.user_stream
+        #
+        # else:
+        #     self.line = LineClient(
+        #         symbol=settings.symbol,
+        #         uri=settings.broker_amqp_uri,
+        #         entities=settings.entities,
+        #     )
+        #     self.exchange = BinanceClient(
+        #         public_key=settings.binance_public_key,
+        #         private_key=settings.binance_private_key,
+        #         testnet=settings.binance_testnet,
+        #     )
+        #     self.user_stream = BinanceUserStreamClient(
+        #         exchange=self.exchange,
+        #         testnet=settings.binance_testnet,
+        #     )
 
-        if settings.replay:
-            logging.warning('*** The strategy is processing historical data! ***')
+        self.assets: Dict[Asset, AccountBalanceModel] = {}
 
-            self.line = ReplayClient(
-                db=self.db,
-                symbol=settings.symbol,
-                replay_speed=settings.replay_speed,
-                replay_from=settings.replay_from,
-                replay_to=settings.replay_to,
-            )
-            self.line.add_done_callback(self._replay_summary)
-            self.exchange = FakeExchangeClient(self.line)
-            self.user_stream = self.exchange.user_stream
-
-        else:
-            self.line = LineClient(
-                symbol=settings.symbol,
-                uri=settings.broker_amqp_uri,
-                entities=settings.entities,
-            )
-            self.exchange = BinanceClient(
-                public_key=settings.binance_public_key,
-                private_key=settings.binance_private_key,
-                testnet=settings.binance_testnet,
-            )
-            self.user_stream = BinanceUserStreamClient(
-                exchange=self.exchange,
-                testnet=settings.binance_testnet,
-            )
-
-        self._ready = asyncio.Event()
-        self._last_signal_check: int = 0
+        self._ready: bool = False
         self._callbacks: Dict[str, Set] = {}
         self._loop = asyncio.get_event_loop()
 
@@ -97,16 +100,10 @@ class BaseStrategy(metaclass=abc.ABCMeta):
             exchange=self.exchange,
             user_stream=self.user_stream,
             storage=self.storage,
-            strategy=self.name,
-            symbol=self.settings.symbol,
+            strategy_id=self.rules.id,
+            symbols=self.rules.symbols,
+            state=self.state
         )
-        self.contract: Optional[ContractModel] = None
-        self.price: Optional[BookUpdateModel] = None
-        self.assets: Dict[Asset, AccountBalanceModel] = {}
-
-        self.line.add_update_callback(StreamEntity.BOOK, self._on_book_update)
-        self.line.add_update_callback(StreamEntity.TRADE, self._on_trade_update)
-        self.line.add_update_callback(StreamEntity.DEPTH, self._on_depth_update)
 
         self.user_stream.add_update_callback(UserStreamEntity.ACCOUNT_UPDATE, self._on_account_update)
         self.user_stream.add_update_callback(UserStreamEntity.ACCOUNT_CONFIG_UPDATE, self._on_account_config_update)
@@ -124,10 +121,9 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         await self._preload_data()
         await self._configure_mode()
         await self._trigger_callbacks('start')
-        self._ready.set()
+        self._ready = True
 
     async def stop(self):
-        await self.line.disconnect()
         await self._trigger_callbacks('stop')
         self._loop.stop()
 
@@ -135,9 +131,67 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         # TODO: Implement summary!
         await self.stop()
 
-    @abc.abstractmethod
-    def check_signal(self, tick_type: TickType):
-        ...
+    def check_signal(self, symbol: Symbol):
+        output: Dict[Tuple[PositionSide, OrderSide], Dict[Tuple[Indicator, Timeframe], bool]] = {}
+        quantity = self.calc_trade_quantity(symbol, self.rules.balance_stake, OrderSide.BUY)
+
+        for condition in self.rules.conditions:
+            candles = self.state.get_candles(symbol, condition.timeframe)
+            result = False
+
+            for index in list(map(lambda i: i * -1, range(1, condition.save_signal_candles + 1))):
+                parameters = {**{i.field: i.value for i in condition.parameters}, 'index': index}
+                values = candles.get(condition.indicator, parameters)
+
+                for cond in condition.conditions:
+                    result = self._compare(cond.condition, values[cond.field], cond.value)
+
+                    if result:
+                        break
+
+                else:
+                    continue
+
+                break
+
+            output.setdefault((condition.position_side, condition.order_side), {})[(condition.indicator, condition.timeframe)] = result
+
+        for (position_side, order_side), results in output.items():
+            triggered_cnt = len(list(filter(lambda i: i is True, results.values())))
+
+            if triggered_cnt >= self.rules.conditions_trigger_count:
+                position = self.storage.get_position(symbol, position_side)
+
+                if position:
+                    orders = self.storage.get_orders(symbol, position.id, order_side)
+
+                    if orders:
+                        continue
+
+                self.place_order(
+                    symbol=symbol,
+                    position_side=position_side,
+                    order_side=order_side,
+                    quantity=quantity,
+                    trailing=self.rules.trailing,
+                    context={},
+                )
+
+    @staticmethod
+    def _compare(condition, a1, a2):
+        if a1 is None or a1 is None:
+            return False
+
+        if condition == 'eq':
+            return a1 == a2
+        elif condition == 'lt':
+            return a1 < a2
+        elif condition == 'lte':
+            return a1 <= a2
+        elif condition == 'gt':
+            return a1 > a2
+        elif condition == 'gte':
+            return a1 >= a2
 
     def close_position(self, position: PositionModel, context: Optional[Dict] = None, trailing: bool = False):
         kwargs = dict(
@@ -151,8 +205,9 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         else:
             self.close_short(**kwargs)
 
-    def open_long(self, quantity: Decimal, context: Optional[Dict] = None, trailing: bool = False):
+    def open_long(self, symbol: Symbol, quantity: Decimal, context: Optional[Dict] = None, trailing: bool = False):
         self.place_order(
+            symbol=symbol,
             quantity=quantity,
             position_side=PositionSide.LONG,
             order_side=OrderSide.BUY,
@@ -160,8 +215,9 @@ class BaseStrategy(metaclass=abc.ABCMeta):
             context=context
         )
 
-    def open_short(self, quantity: Decimal, context: Optional[Dict] = None, trailing: bool = False):
+    def open_short(self, symbol: Symbol, quantity: Decimal, context: Optional[Dict] = None, trailing: bool = False):
         self.place_order(
+            symbol=symbol,
             quantity=quantity,
             position_side=PositionSide.SHORT,
             order_side=OrderSide.SELL,
@@ -169,8 +225,9 @@ class BaseStrategy(metaclass=abc.ABCMeta):
             context=context
         )
 
-    def close_long(self, quantity: Decimal, trailing: bool = False, context: Optional[Dict] = None):
+    def close_long(self, symbol: Symbol, quantity: Decimal, trailing: bool = False, context: Optional[Dict] = None):
         self.place_order(
+            symbol=symbol,
             position_side=PositionSide.LONG,
             order_side=OrderSide.SELL,
             quantity=quantity,
@@ -178,8 +235,9 @@ class BaseStrategy(metaclass=abc.ABCMeta):
             context=context
         )
 
-    def close_short(self, quantity: Decimal, trailing: bool = False, context: Optional[Dict] = None):
+    def close_short(self, symbol: Symbol, quantity: Decimal, trailing: bool = False, context: Optional[Dict] = None):
         self.place_order(
+            symbol=symbol,
             position_side=PositionSide.SHORT,
             order_side=OrderSide.BUY,
             quantity=quantity,
@@ -189,133 +247,114 @@ class BaseStrategy(metaclass=abc.ABCMeta):
 
     def place_order(
             self,
+            symbol: Symbol,
             position_side: PositionSide,
             order_side: OrderSide,
             quantity: Decimal,
             trailing: bool = False,
             context: Optional[Dict] = None
     ):
-        if not self.contract or not self.price:
-            return
+        book = self.state.get_book(symbol)
+        contract = self.state.get_contract(symbol)
 
         command = PlaceOrder(
-            contract=self.contract,
+            contract=contract,
             position_side=position_side,
             order_side=order_side,
             quantity=quantity,
             context=context
         )
 
-        if trailing and self.settings.trailing_callback_rate:
+        if trailing and self.rules.trailing_callback_rate:
             command = TrailingStop(
-                contract=self.contract,
-                price=self.price,
+                contract=contract,
+                price=book,
                 order_side=order_side,
-                callback_rate=self.settings.trailing_callback_rate,
+                callback_rate=self.rules.trailing_callback_rate,
                 next_command=command,
             )
 
-        self.command_handler.append(command)
+        self.command_handler.append(symbol, command)
 
-    def calc_trade_quantity(self, balance_stake: Decimal, order_side: OrderSide) -> Optional[Decimal]:
-        if not (self.price and self.contract and self.assets):
+    def calc_trade_quantity(self, symbol: Symbol, balance_stake: Decimal, order_side: OrderSide) -> Optional[Decimal]:
+        contract = self.state.get_contract(symbol)
+        book = self.state.get_book(symbol)
+
+        if not self.assets:
             return
 
-        price = self.price.bid if order_side is OrderSide.BUY else self.price.ask
+        price = book.bid if order_side is OrderSide.BUY else book.ask
 
         if price <= 0:
             logging.warning('Abnormal price during calc quantity!')
             return
 
-        balance = self.assets[self.contract.quote_asset].wallet_balance
-        quantity = balance * balance_stake * self.settings.leverage / price
-        quantity = remove_exponent(round(quantity / self.contract.lot_size) * self.contract.lot_size)
+        balance = self.assets[contract.quote_asset].wallet_balance
+        quantity = balance * balance_stake * self.rules.leverage / price
+        quantity = remove_exponent(round(quantity / contract.lot_size) * contract.lot_size)
 
-        if quantity * price < self.contract.min_notional:
+        if quantity * price < contract.min_notional:
             logging.error(f'"calc_trade_quantity": The quantity is too small! '
-                          f'quote_asset={self.contract.quote_asset}; '
-                          f'base_asset={self.contract.base_asset}; '
+                          f'quote_asset={contract.quote_asset}; '
+                          f'base_asset={contract.base_asset}; '
                           f'balance={balance}; '
                           f'balance_stake={balance_stake}; '
                           f'quantity={quantity}; '
                           f'price={price}; '
-                          f'lot_size={self.contract.lot_size}; '
-                          f'min_notional={self.contract.min_notional};')
+                          f'lot_size={contract.lot_size}; '
+                          f'min_notional={contract.min_notional};')
             return
 
         return quantity
 
-    async def _set_depth_snapshot(self):
-        depth = await self.exchange.get_depth(
-            symbol=self.settings.symbol,
-            limit=self.settings.depth_limit,
-        )
-        self.depth.set_snapshot(depth)
+    # async def _set_depth_snapshot(self):
+    #     depth = await self.exchange.get_depth(
+    #         symbol=self.settings.symbol,
+    #         limit=self.settings.depth_limit,
+    #     )
+    #     self.depth.set_snapshot(depth)
 
-    async def _on_book_update(self, model: BookUpdateModel):
-        self.price = model
-        self.command_handler.set_price(model)
+    async def on_book_update(self, symbol: Symbol):
+        if symbol not in self.rules.symbols:
+            return
 
-        if not self._ready.is_set():
+        if not self._ready:
             return
 
         # Execute commands (trailing)
-        if self.command_handler.has_outgoing_commands:
-            await self.command_handler.execute()
+        if self.command_handler.has_outgoing_commands(symbol):
+            await self.command_handler.execute(symbol)
             return
 
         for position_side in PositionSide.values():
-            position = self.storage.get_position(position_side)
+            position = self.storage.get_position(symbol, position_side)
 
             if position:
-                self.check_stop_loss(position)
-                self.check_take_profit(position)
+                self.check_stop_loss(symbol, position)
+                self.check_take_profit(symbol, position)
 
                 # Execute commands
-                if self.command_handler.has_outgoing_commands:
-                    await self.command_handler.execute()
+                if self.command_handler.has_outgoing_commands(symbol):
+                    await self.command_handler.execute(symbol)
 
-    async def _on_trade_update(self, model: TradeUpdateModel):
-        if not self._ready.is_set():
+    async def on_candles_update(self, symbol: Symbol):
+        if not self._ready:
             return
 
-        skip = self._check_delay(model.timestamp)
-
-        if skip:
+        if symbol not in self.rules.symbols:
             return
 
-        tick_type = self.candles.update(model)
+        self.check_signal(symbol)
 
-        if not self.price:
-            return
+        # Execute commands
+        if self.command_handler.has_outgoing_commands(symbol):
+            await self.command_handler.execute(symbol)
 
-        # Execute commands (trailing)
-        if self.command_handler.has_outgoing_commands:
-            await self.command_handler.execute()
-            return
-
-        interval = self.settings.signal_check_interval
-        diff = model.timestamp - self._last_signal_check
-
-        # Limit signal check to interval
-        if (interval is not None and diff >= interval * 1000) or tick_type is TickType.NEW_CANDLE:
-            self.check_signal(tick_type)
-            self._last_signal_check = model.timestamp
-
-            # Execute commands
-            if self.command_handler.has_outgoing_commands:
-                await self.command_handler.execute()
-
-    def _on_depth_update(self, model: DepthUpdateModel):
-        if not self._ready.is_set():
-            return
-
-        skip = self._check_delay(model.timestamp)
-
-        if skip:
-            return
-
-        self.depth.update(model)
+    # def _on_depth_update(self, model: DepthUpdateModel):
+    #     if not self._ready:
+    #         return
+    #
+    #     self.depth.update(model)
 
     def _on_account_update(self, model: AccountModel):
         for asset, balance in model.assets.items():
@@ -328,22 +367,26 @@ class BaseStrategy(metaclass=abc.ABCMeta):
     def _on_account_config_update(model: AccountConfigModel):
         logging.info('Account config updated! symbol=%s; leverage=%d', model.symbol, model.leverage)
 
-    def check_stop_loss(self, position: PositionModel):
-        triggered = False
-
+    def check_stop_loss(self, symbol: Symbol, position: PositionModel):
         if not self.stop_loss:
             return
 
         if position.is_closed or not position.quantity:
             return
 
+        book = self.state.get_book(symbol)
+
+        triggered = False
+        trigger = 0
+        price = 0
+
         if position.side is PositionSide.LONG:
-            price = self.price.bid
+            price = book.bid
             trigger = position.entry_price * (1 - self.stop_loss.rate)
             triggered = price <= trigger
 
         elif position.side is PositionSide.SHORT:
-            price = self.price.ask
+            price = book.ask
             trigger = position.entry_price * (1 + self.stop_loss.rate)
             triggered = price >= trigger
 
@@ -359,18 +402,21 @@ class BaseStrategy(metaclass=abc.ABCMeta):
                 trailing=True,
             )
 
-    def check_take_profit(self, position: PositionModel):
+    def check_take_profit(self, symbol: Symbol, position: PositionModel):
         if not self.take_profit:
             return
 
         if position.is_closed or not position.quantity:
             return
 
+        book = self.state.get_book(symbol)
+        contract = self.state.get_contract(symbol)
+
         triggered = False
         order_side = None
         steps_count = self.take_profit.steps_count
         exit_side = position.get_exit_order_side()
-        exit_orders = self.storage.get_orders(position.id, exit_side)
+        exit_orders = self.storage.get_orders(position.symbol, position.id, exit_side)
         next_step = len(exit_orders) + 1
 
         if steps_count < next_step:
@@ -380,30 +426,30 @@ class BaseStrategy(metaclass=abc.ABCMeta):
 
         if position.side is PositionSide.LONG:
             order_side = OrderSide.SELL
-            triggered = self.price.bid >= position.entry_price * (1 + step.level)
+            triggered = book.bid >= position.entry_price * (1 + step.level)
 
         elif position.side is PositionSide.SHORT:
             order_side = OrderSide.BUY
-            triggered = self.price.ask <= position.entry_price * (1 - step.level)
+            triggered = book.ask <= position.entry_price * (1 - step.level)
 
         if triggered and order_side:
             logging.info(f'Take profit level {step.level} reached! '
                          f'position_id={position.id}')
             quantity = position.total_quantity * step.stake
-            price = self.price.bid if position.side is PositionSide.LONG else self.price.ask
+            price = book.bid if position.side is PositionSide.LONG else book.ask
             diff_quantity = 0
 
-            if quantity * price < self.contract.min_notional:
+            if quantity * price < contract.min_notional:
                 # Increase to the min_notional
                 prev_quantity = quantity
-                quantity = self.contract.min_notional / price
+                quantity = contract.min_notional / price
                 diff_quantity = quantity - prev_quantity
 
             # If stake of the remaining steps less than min_notional - use the entire quantity
             rest_stake = sum([self.take_profit.steps[i - 1].stake for i in range(next_step, steps_count)])
             rest_quantity = position.total_quantity * rest_stake - diff_quantity
 
-            if rest_quantity * price < self.contract.min_notional:
+            if rest_quantity * price < contract.min_notional:
                 quantity = position.quantity
 
             if quantity >= position.quantity:
@@ -414,8 +460,9 @@ class BaseStrategy(metaclass=abc.ABCMeta):
                 )
 
             else:
-                quantity = remove_exponent(round(quantity / self.contract.lot_size) * self.contract.lot_size)
+                quantity = remove_exponent(round(quantity / contract.lot_size) * contract.lot_size)
                 self.place_order(
+                    symbol=symbol,
                     position_side=position.side,
                     order_side=order_side,
                     quantity=quantity,
@@ -425,28 +472,14 @@ class BaseStrategy(metaclass=abc.ABCMeta):
 
     async def _prepare_resources(self):
         await self.db.connect()
-        await self.line.connect()
         await self.user_stream.connect()
 
     async def _preload_data(self):
-        contracts, account = await asyncio.gather(
-            self.exchange.get_contracts(),
-            self.exchange.get_account_info(),
-        )
-
-        self.contract = contracts[self.settings.symbol]
+        account = await self.exchange.get_account_info()
         self.assets = account.assets
 
-        if self.settings.candles_limit:
-            candles = await self.exchange.get_historical_candles(
-                symbol=self.settings.symbol,
-                timeframe=self.settings.timeframe,
-                limit=self.settings.candles_limit,
-            )
-            self.candles.set_snapshot(candles)
-
-        if self.settings.depth_limit:
-            await self._set_depth_snapshot()
+        # if self.settings.depth_limit:
+        #     await self._set_depth_snapshot()
 
         await self._set_positions(account.positions)
 
@@ -454,52 +487,53 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         db_positions_list: List[PositionModel] = await self.db.find(
             model=PositionModel,
             query={
-                'symbol': self.settings.symbol,
-                'strategy': self.name,
+                'symbol': {'$in': self.rules.symbols},
+                'strategy_id': self.rules.id,
                 'status': PositionStatus.OPEN,
             }
         )
-        db_positions = {
-            position.side: position
-            for position in db_positions_list
-        }
-        acc_positions = {
-            position.side: position
-            for position in positions
-            if position.symbol == self.settings.symbol
-        }
-        cur_positions = [position for position in positions if position.quantity > 0]
-        actual_positions = []
 
-        # Match positions
-        for side in set(db_positions) & set(acc_positions):
-            db_position = db_positions[side]
-            acc_position = acc_positions[side]
-            db_position_price = to_decimal_places(db_position.entry_price, self.contract.lot_size)
-            acc_position_price = to_decimal_places(acc_position.entry_price, self.contract.lot_size)
+        db_positions: Dict[Symbol, Dict[PositionSide, PositionModel]] = {}
+        for position in db_positions_list:
+            db_positions.setdefault(position.symbol, {})[position.side] = position
 
-            if db_position_price == acc_position_price and db_position.quantity == acc_position.quantity:
-                actual_positions.append(db_position)
+        acc_positions: Dict[Symbol, Dict[PositionSide, AccountPositionModel]] = {}
+        for position in positions:
+            acc_positions.setdefault(position.symbol, {})[position.side] = position
 
-        # Check for unknown positions
-        if len(actual_positions) != len(cur_positions):
-            raise RuntimeError('Unknown position found!')
+        for symbol in self.rules.symbols:
+            actual_positions = []
+            cur_positions = [position for position in positions if position.symbol == symbol and position.quantity > 0]
+            contract = self.state.get_contract(symbol)
 
-        if not actual_positions:
-            await self._configure_leverage()
+            # Match positions
+            for side in set(db_positions.get(symbol, {})) & set(acc_positions.get(symbol, {})):
+                db_position = db_positions[symbol][side]
+                acc_position = acc_positions[symbol][side]
+                db_position_price = to_decimal_places(db_position.entry_price, contract.lot_size)
+                acc_position_price = to_decimal_places(acc_position.entry_price, contract.lot_size)
 
-        orders: List[OrderModel] = await self.db.find(
-            model=OrderModel,
-            query={
-                'order_id': {
-                    '$in': list(chain.from_iterable([
-                        position.orders
-                        for position in actual_positions
-                    ]))
+                if db_position_price == acc_position_price and db_position.quantity == acc_position.quantity:
+                    actual_positions.append(db_position)
+
+            # Check for unknown positions
+            if len(actual_positions) != len(cur_positions):
+                raise RuntimeError(f'Unknown position found! symbol={symbol}')
+
+            await self._configure_leverage(symbol)
+
+            orders: List[OrderModel] = await self.db.find(
+                model=OrderModel,
+                query={
+                    'id': {
+                        '$in': list(chain.from_iterable([
+                            position.orders
+                            for position in actual_positions
+                        ]))
+                    }
                 }
-            }
-        )
-        self.storage.set_snapshot(actual_positions, orders)
+            )
+            self.storage.set_snapshot(symbol, actual_positions, orders)
 
     async def _configure_mode(self):
         hedge_mode = await self.exchange.is_hedge_mode()
@@ -507,25 +541,8 @@ class BaseStrategy(metaclass=abc.ABCMeta):
         if not hedge_mode:
             await self.exchange.change_position_mode(hedge_mode=True)
 
-    async def _configure_leverage(self):
-        await self.exchange.change_leverage(self.contract.symbol, self.settings.leverage)
-
-    def _check_delay(self, timestamp: Timestamp) -> bool:
-        skip = False
-
-        if not self.settings.replay:
-            diff = time() * 1000 - timestamp
-            exchange_name = self.exchange.__class__.__name__
-
-            if diff >= 2000:
-                logging.warning(f'{exchange_name}: Messages processing delay of {diff / 1000}s!')
-                skip = True
-
-            if diff >= 12000:
-                logging.error('Stopping the program due to critical delay!')
-                self._loop.create_task(self.stop())
-
-        return skip
+    async def _configure_leverage(self, symbol: Symbol):
+        await self.exchange.change_leverage(symbol, self.rules.leverage)
 
     async def _trigger_callbacks(self, action: Any, *args, **kwargs):
         callbacks = self._callbacks.get(action, set())

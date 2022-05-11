@@ -38,11 +38,14 @@ class AutoNameUp(str, BaseEnum):
 
 PositionId = NewType('PositionId', str)
 OrderId = NewType('OrderId', int)
+StrategyId = NewType('StrategyId', str)
 ClientOrderId = NewType('ClientOrderId', str)
 Timestamp = NewType('Timestamp', int)
 Symbol = NewType('Symbol', str)
 Asset = NewType('Asset', str)
 Timeframe = Literal['1m', '5m', '15m', '30m', '1h', '4h', '6h', '1d']
+Indicator = Literal['rsi', 'roc', 'stochastic']
+Condition = Literal['gt', 'gte', 'eq', 'lt', 'lte']
 
 
 @unique

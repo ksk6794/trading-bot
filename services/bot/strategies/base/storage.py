@@ -1,38 +1,43 @@
 from typing import Dict, Optional, List
 
 from modules.models import OrderModel, PositionModel
-from modules.models.types import OrderId, PositionId, OrderSide, PositionSide
+from modules.models.types import OrderId, PositionId, OrderSide, PositionSide, Symbol
 
 
 class LocalStorage:
     def __init__(self):
-        self._positions: Dict[PositionSide, PositionModel] = {}
-        self._orders: Dict[OrderId: OrderModel] = {}
+        self._positions: Dict[Symbol, Dict[PositionSide, PositionModel]] = {}
+        self._orders: Dict[Symbol, Dict[OrderId: OrderModel]] = {}
 
-    def set_snapshot(self, positions: List[PositionModel], orders: List[OrderModel]):
+    def set_snapshot(self, symbol: Symbol, positions: List[PositionModel], orders: List[OrderModel]):
         for position in positions:
-            self.set_position(position)
-        self.set_orders(orders)
+            self.set_position(position.symbol, position)
+        self.set_orders(symbol, orders)
 
-    def set_position(self, position: PositionModel):
-        self._positions[position.side] = position
+    def set_position(self, symbol: Symbol, position: PositionModel):
+        self._positions.setdefault(symbol, {})[position.side] = position
 
-    def drop_position(self, position_side: PositionSide):
-        self._positions.pop(position_side, None)
+    def drop_position(self, symbol: Symbol, position_side: PositionSide):
+        self._positions.get(symbol, {}).pop(position_side, None)
 
-    def get_position(self, position_side: PositionSide) -> Optional[PositionModel]:
-        return self._positions.get(position_side)
+    def get_position(self, symbol: Symbol, position_side: PositionSide) -> Optional[PositionModel]:
+        return self._positions.get(symbol, {}).get(position_side)
 
-    def set_orders(self, orders: List[OrderModel]):
-        self._orders = {order.id: order for order in orders}
+    def set_orders(self, symbol: Symbol, orders: List[OrderModel]):
+        self._orders[symbol] = {order.id: order for order in orders}
 
-    def get_order(self, order_id: OrderId) -> Optional[OrderModel]:
-        return self._orders.get(order_id)
+    def get_order(self, symbol: Symbol, order_id: OrderId) -> Optional[OrderModel]:
+        return self._orders.get(symbol, order_id)
 
-    def get_orders(self, position_id: PositionId, order_side: Optional[OrderSide] = None) -> List[OrderModel]:
+    def get_orders(
+            self,
+            symbol: Symbol,
+            position_id: PositionId,
+            order_side: Optional[OrderSide] = None
+    ) -> List[OrderModel]:
         orders = []
 
-        for order in self._orders.values():
+        for order in self._orders.get(symbol, {}).values():
             if order.position_id != position_id:
                 continue
 
@@ -43,12 +48,12 @@ class LocalStorage:
 
         return orders
 
-    def add_order(self, order: OrderModel):
-        self._orders[order.id] = order
+    def add_order(self, symbol: Symbol, order: OrderModel):
+        self._orders.setdefault(symbol, {})[order.id] = order
 
-    def drop_orders(self, position_id: PositionId):
-        self._orders = {
+    def drop_orders(self, symbol: Symbol, position_id: PositionId):
+        self._orders[symbol] = {
             order_id: order
-            for order_id, order in self._orders.items()
+            for order_id, order in self._orders[symbol].items()
             if order.position_id != position_id
         }

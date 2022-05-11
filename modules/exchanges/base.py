@@ -13,10 +13,6 @@ from modules.models.types import (
 
 class BaseExchangeClient(metaclass=abc.ABCMeta):
     @abc.abstractmethod
-    async def get_account_info(self) -> AccountModel:
-        ...
-
-    @abc.abstractmethod
     async def get_contracts(self) -> Dict[Symbol, ContractModel]:
         """
         Current exchange trading rules and symbol information
@@ -28,6 +24,32 @@ class BaseExchangeClient(metaclass=abc.ABCMeta):
         """
         Mark Price and Funding Rate
         """
+        ...
+
+    @abc.abstractmethod
+    async def get_historical_candles(
+            self,
+            symbol: Symbol,
+            timeframe: Timeframe,
+            limit: int = 1000,
+            start_time: Optional[str] = None
+    ) -> List[CandleModel]:
+        """
+        Candlestick bars snapshot for a symbol.
+        """
+        ...
+
+    @abc.abstractmethod
+    async def get_depth(self, symbol: Symbol, limit: int = 1000) -> DepthModel:
+        """
+        Order book snapshot for a symbol.
+        """
+        ...
+
+
+class BaseExchangeUserClient(metaclass=abc.ABCMeta):
+    @abc.abstractmethod
+    async def get_account_info(self) -> AccountModel:
         ...
 
     @abc.abstractmethod
@@ -53,26 +75,6 @@ class BaseExchangeClient(metaclass=abc.ABCMeta):
 
     @abc.abstractmethod
     async def change_margin_type(self, symbol: Symbol, margin_type: MarginType):
-        ...
-
-    @abc.abstractmethod
-    async def get_historical_candles(
-            self,
-            symbol: Symbol,
-            timeframe: Timeframe,
-            limit: int = 1000,
-            start_time: Optional[str] = None
-    ) -> List[CandleModel]:
-        """
-        Candlestick bars snapshot for a symbol.
-        """
-        ...
-
-    @abc.abstractmethod
-    async def get_depth(self, symbol: Symbol, limit: int = 1000) -> DepthModel:
-        """
-        Order book snapshot for a symbol.
-        """
         ...
 
     @abc.abstractmethod

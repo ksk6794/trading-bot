@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from modules.models import StopLossConfig, TakeProfitConfig
-from modules.models.types import OrderSide, PositionSide, TickType
+from modules.models.types import OrderSide, PositionSide, TickType, Symbol, Timeframe
 
 from .base import BaseStrategy
 
@@ -28,9 +28,11 @@ class ScalpStrategy(BaseStrategy):
         self._rsi = None
         self._stoch = None
 
-    def check_signal(self, tick_type: TickType):
-        self._rsi = self.candles.get_rsi()
-        self._stoch = self.candles.get_stochastic()
+    def check_signal(self):
+        candles = self.candles[(Symbol('BTCUSDT'), Timeframe('5m'))]
+
+        self._rsi = candles.get_rsi()
+        self._stoch = candles.get_stochastic()
 
         # LONG
         if (

@@ -46,6 +46,13 @@ class BookUpdateModel(BaseModel):
     ask: Decimal = Field(..., alias='a')
 
     @classmethod
+    def from_binance(cls, data: Dict):
+        return cls(
+            bid=data['bidPrice'],
+            ask=data['askPrice'],
+        )
+
+    @classmethod
     def from_stream(cls, data: Dict):
         return cls(
             bid=data['b'],

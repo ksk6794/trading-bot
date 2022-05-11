@@ -3,20 +3,21 @@ import logging
 from uuid import uuid4
 from decimal import Decimal
 from time import time
-from typing import Optional, Callable, Dict, Set
+from typing import Optional, Callable, Dict, Set, List
 
 from orderedset import OrderedSet
 from expiringdict import ExpiringDict
 
 from modules.mongo import MongoClient
-from modules.models import PositionModel, OrderModel, BookUpdateModel
-from modules.exchanges import BinanceClient, BinanceUserStreamClient
+from modules.models import PositionModel, OrderModel
+from modules.exchanges import BinanceUserClient, BinanceUserStreamClient
 from modules.models.commands import Command, TrailingStop, PlaceOrder
 from modules.models.types import (
     PositionId, PositionStatus, PositionSide, ClientOrderId, OrderType,
-    UserStreamEntity, Symbol,
+    UserStreamEntity, Symbol, StrategyId,
 )
 
+from services.bot.state import ExchangeState
 from services.bot.strategies.base.utils import method_dispatch
 from services.bot.strategies.base.storage import LocalStorage
 
@@ -25,23 +26,24 @@ class CommandHandler:
     def __init__(
             self,
             db: MongoClient,
-            exchange: BinanceClient,
+            exchange: BinanceUserClient,
             user_stream: BinanceUserStreamClient,
             storage: LocalStorage,
-            strategy: str,
-            symbol: Symbol,
+            strategy_id: StrategyId,
+            symbols: List[Symbol],
+            state: ExchangeState
     ):
         self.db = db
         self.exchange = exchange
         self.user_stream = user_stream
         self.storage = storage
-        self.strategy = strategy
-        self.symbol = symbol
-        self.price: Optional[BookUpdateModel] = None
+        self.strategy_id = strategy_id
+        self.symbols = symbols
+        self.state = state
 
-        self._commands: OrderedSet[Command] = OrderedSet()
+        self._commands: Dict[Symbol, OrderedSet[Command]] = {}
         self._waiting: ExpiringDict[ClientOrderId, PlaceOrder] = ExpiringDict(
-            max_len=2,
+            max_len=100,
             max_age_seconds=30
         )
         self._callbacks: Dict[str, Set[Callable]] = {}
@@ -49,29 +51,24 @@ class CommandHandler:
 
         self.user_stream.add_update_callback(UserStreamEntity.ORDER_TRADE_UPDATE, self._update_order)
 
-    def __len__(self):
-        return len(self._commands)
+    def has_outgoing_commands(self, symbol: Symbol) -> bool:
+        return bool(self._commands.get(symbol, set()))
 
-    @property
-    def has_outgoing_commands(self) -> bool:
-        return bool(self._commands)
-
-    def append(self, command: Command):
+    def append(self, symbol: Symbol, command: Command):
         if command not in self._commands:
-            self._commands.add(command)
+            self._commands.setdefault(symbol, OrderedSet()).add(command)
         else:
             logging.warning('Duplicate command ignored!')
 
-    def set_price(self, price: BookUpdateModel):
-        self.price = price
+    async def execute(self, symbol: Symbol):
+        commands = self._commands.get(symbol, set())
 
-    async def execute(self):
-        if not self._commands:
+        if not commands:
             return
 
         next_commands = OrderedSet()
 
-        for command in self._commands:
+        for command in commands:
             while command:
                 command = await self.handle(command)
 
@@ -79,7 +76,7 @@ class CommandHandler:
                     next_commands.add(command)
                     break
 
-        self._commands = next_commands
+        self._commands[symbol] = next_commands
 
     @method_dispatch  # pragma: no cover
     async def handle(self, command: Command, **kwargs) -> Optional[Command]:
@@ -87,7 +84,8 @@ class CommandHandler:
 
     @handle.register(TrailingStop)
     async def handle_trailing_stop(self, command: TrailingStop) -> Command:
-        triggered = command.update(self.price)
+        book = self.state.get_book(command.symbol)
+        triggered = book and command.update(book)
 
         if triggered:
             next_command = command.next_command
@@ -102,7 +100,9 @@ class CommandHandler:
         client_order_id = ClientOrderId(uuid4().hex)
         self._waiting[client_order_id] = command
 
-        order = await self.exchange.place_order(
+        logging.info(f'Placing order: symbol={command.contract.symbol}')
+
+        await self.exchange.place_order(
             client_order_id=client_order_id,
             contract=command.contract,
             order_type=OrderType.MARKET,
@@ -111,13 +111,14 @@ class CommandHandler:
             order_side=command.order_side
         )
 
-        if order:
-            if not order.is_processed:
-                order = await self._wait_for_processed(order)
-            await self._update_order(order)
+        # TODO: ?
+        # if order:
+        #     if not order.is_processed:
+        #         order = await self._wait_for_processed(order)
+        #     await self._update_order(order)
 
     async def _update_order(self, order: OrderModel):
-        if order.symbol != self.symbol:
+        if order.symbol not in self.symbols:
             return
 
         count = await self.db.count(OrderModel, query={'id': order.id})
@@ -135,16 +136,17 @@ class CommandHandler:
             )
 
         if order.is_filled:
-            position = self.storage.get_position(order.position_side)
+            position = self.storage.get_position(order.symbol, order.position_side)
 
             if not position:
-                position = await self._create_position(order.position_side)
-                order = await self.db.partial_update(
-                    model=OrderModel,
-                    update_fields={'position_id': position.id},
-                    query={'id': order.id}
-                )
-                self.storage.add_order(order)
+                position = await self._create_position(order.symbol, order.position_side)
+
+            order = await self.db.partial_update(
+                model=OrderModel,
+                update_fields={'position_id': position.id},
+                query={'id': order.id}
+            )
+            self.storage.add_order(order.symbol, order)
 
             logging.info(f'Order filled! '
                          f'position_id={position.id}; '
@@ -156,13 +158,14 @@ class CommandHandler:
 
     async def _create_position(
             self,
+            symbol: Symbol,
             position_side: PositionSide,
     ) -> PositionModel:
         position = PositionModel(
             id=PositionId(uuid4().hex),
-            symbol=self.symbol,
+            symbol=symbol,
             side=position_side,
-            strategy=self.strategy,
+            strategy_id=self.strategy_id,
             status=PositionStatus.OPEN,
             quantity=Decimal('0'),
             total_quantity=Decimal('0'),
@@ -173,7 +176,7 @@ class CommandHandler:
             create_timestamp=int(time() * 1000),
         )
         await self.db.create(position)
-        self.storage.set_position(position)
+        self.storage.set_position(symbol, position)
 
         logging.info(f'Position created! '
                      f'position_id={position.id};')
@@ -187,7 +190,7 @@ class CommandHandler:
         # If the order is a position entry
         if order.side is entry_side:
             # Calculate avg position entry price
-            entry_orders = self.storage.get_orders(position.id, entry_side)
+            entry_orders = self.storage.get_orders(position.symbol, position.id, entry_side)
             total_price = sum([order.quantity * order.entry_price for order in entry_orders])
             total_quantity = sum([order.quantity for order in entry_orders])
             position.entry_price = total_price / total_quantity
@@ -196,7 +199,7 @@ class CommandHandler:
 
         else:
             # Calculate avg position exit price
-            exit_orders = self.storage.get_orders(position.id, exit_side)
+            exit_orders = self.storage.get_orders(position.symbol, position.id, exit_side)
             total_price = sum([order.quantity * order.entry_price for order in exit_orders])
             total_quantity = sum([order.quantity for order in exit_orders])
             position.exit_price = total_price / total_quantity
@@ -214,8 +217,8 @@ class CommandHandler:
 
         if position.is_closed:
             # Clean up local state
-            self.storage.drop_position(position.side)
-            self.storage.drop_orders(position.id)
+            self.storage.drop_position(position.symbol, position.side)
+            self.storage.drop_orders(position.symbol, position.id)
 
             logging.info(f'Position closed! '
                          f'position_id={position.id}; '

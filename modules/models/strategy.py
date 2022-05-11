@@ -4,7 +4,8 @@ from typing import List, Optional
 from pydantic import BaseModel, condecimal, validator
 
 from modules.models.line import BookUpdateModel
-from modules.models.types import OrderId, PositionSide, Timestamp, Symbol, PositionStatus, PositionId, OrderSide
+from modules.models.types import OrderId, PositionSide, Timestamp, Symbol, PositionStatus, PositionId, OrderSide, \
+    StrategyId
 
 
 class StopLossConfig(BaseModel):
@@ -36,7 +37,7 @@ class PositionModel(BaseModel):
     id: PositionId
     symbol: Symbol
     side: PositionSide
-    strategy: str
+    strategy_id: StrategyId
     status: PositionStatus
     quantity: Decimal
     total_quantity: Decimal

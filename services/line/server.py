@@ -1,12 +1,13 @@
 import asyncio
 import logging
+from time import time
 from typing import Dict
 
 from modules.exchanges import BinanceStreamClient
 from modules.models.indexes import INDEXES
 from modules.mongo.client import MongoClient
 from modules.models.line import TradeUpdateModel, BookUpdateModel, DepthUpdateModel
-from modules.models.types import Symbol, StreamEntity
+from modules.models.types import Symbol, StreamEntity, Timestamp
 
 from .settings import Settings
 from .publisher import LinePublisher
@@ -46,6 +47,7 @@ class LineServer:
         await self.stream.subscribe(self.symbols)
 
     async def _on_trade_update(self, symbol: Symbol, model: TradeUpdateModel):
+        self._check_delay(model.timestamp)
         await self.publisher.publish(
             action='update',
             payload={
@@ -99,3 +101,10 @@ class LineServer:
 
             finally:
                 await asyncio.sleep(30)
+
+    @staticmethod
+    def _check_delay(timestamp: Timestamp):
+        diff = time() * 1000 - timestamp
+
+        if diff >= 2000:
+            logging.warning(f'Messages processing delay of {diff / 1000:.2f}s!')

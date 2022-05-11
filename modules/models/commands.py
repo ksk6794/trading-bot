@@ -8,7 +8,7 @@ from pydantic import BaseModel, condecimal
 
 from modules.models.line import BookUpdateModel
 from modules.models.exchange import ContractModel
-from modules.models.types import PositionId, OrderId, OrderSide, PositionSide
+from modules.models.types import PositionId, OrderId, OrderSide, PositionSide, Symbol
 
 
 class Command(BaseModel):
@@ -27,7 +27,8 @@ class Command(BaseModel):
 
 
 class TrailingStop(Command):
-    price: BookUpdateModel
+    symbol: Symbol
+    book: BookUpdateModel
     order_side: OrderSide
     callback_rate: condecimal(gt=Decimal('0'), le=Decimal('0.02'))
     next_command: Command
@@ -35,47 +36,47 @@ class TrailingStop(Command):
     @property
     def stop_size(self) -> Decimal:
         if self.order_side == OrderSide.BUY:
-            return self.price.bid * self.callback_rate
+            return self.book.bid * self.callback_rate
         else:
-            return self.price.ask * self.callback_rate
+            return self.book.ask * self.callback_rate
 
     @property
     def stop_loss(self) -> Decimal:
         if self.order_side == OrderSide.BUY:
-            return self.price.bid + self.stop_size
+            return self.book.bid + self.stop_size
         else:
-            return self.price.ask - self.stop_size
+            return self.book.ask - self.stop_size
 
-    def update(self, price: BookUpdateModel):
+    def update(self, book: BookUpdateModel):
         triggered = False
         precision = self.contract.price_decimals
 
-        if price.bid <= 0 or price.ask <= 0:
+        if book.bid <= 0 or book.ask <= 0:
             logging.warning('Abnormal price during trailing!')
             return triggered
 
         if self.order_side == OrderSide.BUY:
-            if (price.bid + self.stop_size) < self.stop_loss:
-                self.price = price
+            if (book.bid + self.stop_size) < self.stop_loss:
+                self.book = book
                 logging.info(f'New low observed: '
                              f'Updating stop loss to {self.stop_loss:.{precision}f}')
 
-            elif price.bid >= self.stop_loss:
+            elif book.bid >= self.stop_loss:
                 triggered = True
                 logging.info(f'Buy triggered | '
-                             f'Price: {price.bid:.{precision}f} | '
+                             f'Price: {book.bid:.{precision}f} | '
                              f'Stop loss: {self.stop_loss:.{precision}f}')
 
         elif self.order_side == OrderSide.SELL:
-            if (price.ask - self.stop_size) > self.stop_loss:
-                self.price = price
+            if (book.ask - self.stop_size) > self.stop_loss:
+                self.book = book
                 logging.info(f'New high observed: '
                              f'Updating stop loss to {self.stop_loss:.{precision}f}')
 
-            elif price.ask <= self.stop_loss:
+            elif book.ask <= self.stop_loss:
                 triggered = True
                 logging.info(f'Sell triggered | '
-                             f'Price: {price.ask:.{precision}f} | '
+                             f'Price: {book.ask:.{precision}f} | '
                              f'Stop loss: {self.stop_loss:.{precision}f}')
 
         return triggered

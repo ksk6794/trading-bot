@@ -19,6 +19,9 @@ class TechnicalAnalysis:
         self._df = None
         self._initial_columns = {'timestamp', 'low', 'high', 'open', 'close', 'volume'}
 
+    def __bool__(self):
+        return bool(self._df)
+
     @property
     def df(self):
         return self._df
@@ -49,35 +52,51 @@ class TechnicalAnalysis:
 
         self._df = df
 
+    def get(self, indicator: str, parameters: Dict):
+        method = getattr(self, f'get_{indicator}')
+        return method(**parameters)
+
     ##############################
     #    TECHNICAL INDICATORS    #
     ##############################
 
-    def get_ma(self, index: int = -1, period: int = 12):
+    def get_ma(self, index: int = -1, period: int = 12) -> Dict:
         self._set_ma(period)
 
         ma = self._get(f'ma_{period}', index)
-        return ma and to_decimal(ma)
 
-    def get_ema(self, index: int = -1, period: int = 12):
+        return {
+            'ma': ma and to_decimal(ma)
+        }
+
+    def get_ema(self, index: int = -1, period: int = 12) -> Dict:
         self._set_ema(period)
 
         ema = self._get(f'ema_{period}', index)
-        return ema and to_decimal(ema)
 
-    def get_rsi(self, index: int = -1, period: int = 14) -> Optional[Decimal]:
+        return {
+            'ema': ema and to_decimal(ema)
+        }
+
+    def get_rsi(self, index: int = -1, period: int = 14) -> Dict:
         if 'rsi' not in self._df:
             self._set_rsi(period)
 
         rsi = self._get('rsi', index)
-        return rsi and to_decimal(rsi)
 
-    def get_roc(self, index: int = -1, period: int = 18) -> Optional[Decimal]:
+        return {
+            'rsi': rsi and to_decimal(rsi)
+        }
+
+    def get_roc(self, index: int = -1, period: int = 18) -> Dict:
         if 'roc' not in self._df:
             self._set_roc(period)
 
         roc = self._get('roc', index)
-        return roc and to_decimal(roc)
+
+        return {
+            'roc': roc and to_decimal(roc)
+        }
 
     def get_stochastic(self, index: int = -1, k_period: int = 14, d_period: int = 3) -> Dict[str, Optional[Decimal]]:
         self._set_stochastic(k_period, d_period)
@@ -184,6 +203,10 @@ class TechnicalAnalysis:
             'bb_buy': bb_buy and bool(bb_buy),
             'bb_sell': bb_sell and bool(bb_sell),
         }
+
+    ##############################
+    #    CANDLESTICK PATTERNS    #
+    ##############################
 
     def is_shooting_star(self, index: int = -1):
         self._set_candle_shooting_star()

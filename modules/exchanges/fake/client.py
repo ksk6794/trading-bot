@@ -49,17 +49,17 @@ class FakeExchangeClient(BaseExchangeClient, ABC):
     TAKER_FEE = Decimal('0.0004')  # 0.04% for ≥ 0 BNB
 
     ASSETS: Dict[Asset, Decimal] = {
-        Asset('BTC'): Decimal('0.1'),
-        Asset('ETH'): Decimal('1'),
-        Asset('BNB'): Decimal('1'),
-        Asset('DOT'): Decimal('100'),
-        Asset('USDT'): Decimal('1000'),
+        Asset('BTC'): Decimal('0'),
+        # Asset('ETH'): Decimal('1'),
+        # Asset('BNB'): Decimal('1'),
+        # Asset('DOT'): Decimal('100'),
+        Asset('USDT'): Decimal('2753.69'),
     }
     SYMBOLS: List[Symbol] = [
         Symbol('BTCUSDT'),
-        Symbol('ETHUSDT'),
-        Symbol('BNBUSDT'),
-        Symbol('DOTUSDT'),
+        # Symbol('ETHUSDT'),
+        # Symbol('BNBUSDT'),
+        # Symbol('DOTUSDT'),
     ]
 
     def __init__(self, line: ReplayClient, *args, **kwargs):
