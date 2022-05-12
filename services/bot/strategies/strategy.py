@@ -7,18 +7,18 @@ from itertools import chain
 from typing import Optional, Set, Callable, List, Dict, Any, Tuple
 
 from helpers import remove_exponent, to_decimal_places
-from modules.exchanges.fake.client import FakeExchangeUserClient
-from modules.models.commands import TrailingStop, PlaceOrder
-from modules.models.exchange import AccountPositionModel, AccountBalanceModel
 
 from modules.mongo import MongoClient
 from modules.models import OrderModel, PositionModel, AccountModel, AccountConfigModel
+from modules.models.commands import TrailingStop, PlaceOrder
+from modules.models.exchange import AccountPositionModel, AccountBalanceModel
 from modules.models.types import (
     PositionStatus, OrderSide, UserStreamEntity,
     PositionSide, Asset, Timeframe, Symbol, Indicator
 )
 from modules.exchanges import BinanceUserClient, BinanceUserStreamClient
 from modules.exchanges.base import BaseExchangeClient
+from modules.exchanges.fake.client import FakeExchangeUserClient
 
 from services.bot.strategies.command_handler import CommandHandler
 from services.bot.strategies.storage import LocalStorage
