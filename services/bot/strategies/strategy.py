@@ -99,16 +99,16 @@ class Strategy(metaclass=abc.ABCMeta):
         output: Dict[Tuple[PositionSide, OrderSide], Dict[Tuple[Indicator, Timeframe], bool]] = {}
         quantity = self.calc_trade_quantity(symbol, self.rules.balance_stake, OrderSide.BUY)
 
-        for condition in self.rules.conditions:
-            candles = self.state.get_candles(symbol, condition.timeframe)
+        for cond in self.rules.conditions:
+            candles = self.state.get_candles(symbol, cond.timeframe)
             result = False
 
-            for index in list(map(lambda i: i * -1, range(1, condition.save_signal_candles + 1))):
-                parameters = {**{i.field: i.value for i in condition.parameters}, 'index': index}
-                values = candles.get(condition.indicator, parameters)
+            for index in list(map(lambda i: i * -1, range(1, cond.save_signal_candles + 1))):
+                parameters = {**{i.field: i.value for i in cond.parameters}, 'index': index}
+                values = candles.get(cond.indicator, parameters)
 
-                for cond in condition.conditions:
-                    result = self._compare(cond.condition, values[cond.field], cond.value)
+                for i in cond.conditions:
+                    result = self._compare(i.condition, values[i.field], i.value)
 
                     if result:
                         break
@@ -118,7 +118,7 @@ class Strategy(metaclass=abc.ABCMeta):
 
                 break
 
-            output.setdefault((condition.position_side, condition.order_side), {})[(condition.indicator, condition.timeframe)] = result
+            output.setdefault((cond.position_side, cond.order_side), {})[(cond.indicator, cond.timeframe)] = result
 
         for (position_side, order_side), results in output.items():
             triggered_cnt = len(list(filter(lambda i: i is True, results.values())))
