@@ -1,2 +1,2 @@
-from .client import LineClient, BulkLineClient
+from .client import LineClient
 from .replay_client import ReplayClient

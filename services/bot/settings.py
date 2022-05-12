@@ -5,7 +5,7 @@ from pydantic import BaseSettings, conint
 from pydantic.main import BaseModel
 from pydantic.types import condecimal
 
-from modules.models.types import Symbol, PositionSide, OrderSide, Timeframe, Indicator, Condition, StrategyId
+from modules.models.types import Symbol, PositionSide, OrderSide, Timeframe, Indicator, Condition, StrategyId, Timestamp
 
 
 class Settings(BaseSettings):
@@ -16,10 +16,10 @@ class Settings(BaseSettings):
     binance_testnet: bool = False
     symbols: List[Symbol]
 
-    # replay: bool = False
-    # replay_speed: conint(ge=0, le=100) = 0
-    # replay_from: Optional[Timestamp]
-    # replay_to: Optional[Timestamp]
+    replay: bool = False
+    replay_speed: conint(ge=0, le=100) = 0
+    replay_from: Optional[Timestamp]
+    replay_to: Optional[Timestamp]
 
 
 class IndicatorParameter(BaseModel):

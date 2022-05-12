@@ -45,6 +45,9 @@ class BinanceStreamClient(BaseExchangeStreamClient):
             url = self._ws_url.with_path('/ws')
             await self.ws.connect(url)
 
+    async def reset(self):
+        await self.ws.reconnect()
+
     async def subscribe(self, symbols: List[Symbol]):
         if not self._ws_connected:
             await self.connect()
@@ -59,6 +62,7 @@ class BinanceStreamClient(BaseExchangeStreamClient):
             })
 
     async def _on_connect(self):
+        self.ws_id = 0
         self._ws_connected = True
         await self._trigger_callbacks('connect')
 
@@ -137,7 +141,8 @@ class BinanceUserStreamClient:
 
     async def _key_renewal(self):
         while True:
-            if self._listen_key_exp - time() <= 45 * 60:
+            # If there are 10 minutes left before the key expires
+            if self._listen_key_exp - time() <= 10 * 60:
                 logging.info('Updating listen key...')
                 await self._exchange.update_listen_key()
                 self._listen_key_exp = time() + self.KEY_LIFETIME

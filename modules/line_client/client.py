@@ -1,4 +1,3 @@
-import abc
 import asyncio
 import inspect
 import logging
@@ -9,26 +8,29 @@ from typing import Callable, Set, Dict, List
 from modules.models.line import TradeUpdateModel, BookUpdateModel, DepthUpdateModel
 from modules.models.types import Symbol, StreamEntity
 
-from .types import LineCallback, BulkLineCallback
+from .types import BulkLineCallback
 from .subscriber import LineSubscriber
 
 __all__ = (
     'LineClient',
-    'BulkLineClient',
 )
 
 
-class BaseLineClient:
+class LineClient:
     def __init__(
             self,
             uri: str,
+            symbols: List[Symbol],
             entities: List[StreamEntity],
     ):
         self.subscriber = LineSubscriber(uri)
+        self._symbols = symbols
         self._entities = entities
+
         self._last_alive = None
         self._connected = False
         self._callbacks: Dict[str, Set] = {}
+        self._update_callbacks: Dict[StreamEntity, Set] = {}
         self._models = {
             StreamEntity.TRADE: TradeUpdateModel,
             StreamEntity.BOOK: BookUpdateModel,
@@ -36,7 +38,9 @@ class BaseLineClient:
         }
         self._loop = asyncio.get_event_loop()
 
+        self.subscriber.add_reconnect_callback(self._on_reconnect)
         self.subscriber.add_alive_callback(self._on_alive)
+        self.subscriber.add_reset_callback(self._on_reset)
         self.subscriber.add_update_callback(self._on_update)
 
     async def connect(self):
@@ -51,87 +55,52 @@ class BaseLineClient:
             self._connected = False
             self._loop.stop()
 
-    def add_update_callback(self, entity: StreamEntity, cb: Callable):
+    def add_reset_callback(self, cb: Callable):
+        self._callbacks.setdefault('reset', set()).add(cb)
+
+    def add_update_callback(self, entity: StreamEntity, cb: BulkLineCallback):
         assert StreamEntity.has_value(entity)
         assert callable(cb)
 
-        self._callbacks.setdefault(entity, set()).add(cb)
+        self._update_callbacks.setdefault(entity, set()).add(cb)
 
     @property
     def is_alive(self):
         return self._last_alive and time() - self._last_alive < 10
 
-    @abc.abstractmethod
     async def _subscribe(self):
-        ...
+        routing_keys = ['alive', 'reset',
+                        *[f'{symbol}.{entity}' for symbol, entity in product(self._symbols, self._entities)]]
+        await self.subscriber.subscribe(routing_keys)
 
-    @abc.abstractmethod
-    async def _on_update(self, entity: StreamEntity, symbol: Symbol, data: Dict):
-        ...
+    async def _on_reconnect(self):
+        callbacks = self._callbacks.get('reset', set())
+        await self._trigger_callbacks(callbacks)
 
     def _on_alive(self):
         self._last_alive = time()
         logging.info(f'{self.__class__.__name__}: alive received')
 
-    async def _trigger_callbacks(self, entity: StreamEntity, *args, **kwargs):
-        callbacks = self._callbacks.get(entity, set())
+    async def _on_reset(self):
+        logging.info(f'{self.__class__.__name__}: reset received')
+        callbacks = self._callbacks.get('reset', set())
+        await self._trigger_callbacks(callbacks)
 
+    async def _on_update(self, entity: StreamEntity, symbol: Symbol, data: Dict):
+        assert StreamEntity.has_value(entity)
+        assert symbol in self._symbols
+        assert isinstance(data, dict)
+
+        model_class = self._models[entity]
+        model = model_class(**data)
+        callbacks = self._update_callbacks.get(entity, set())
+
+        await self._trigger_callbacks(callbacks, symbol, model)
+
+    @staticmethod
+    async def _trigger_callbacks(callbacks, *args, **kwargs):
         for callback in callbacks:
             result = callback(*args, **kwargs)
 
             if inspect.isawaitable(result):
                 await result
-
-
-class LineClient(BaseLineClient):
-    def __init__(
-            self,
-            symbol: Symbol,
-            uri: str,
-            entities: List[StreamEntity],
-    ):
-        self.symbol = symbol
-        super().__init__(uri, entities)
-
-    def add_update_callback(self, entity: StreamEntity, cb: LineCallback):
-        super().add_update_callback(entity, cb)
-
-    async def _subscribe(self):
-        routing_keys = ['alive', *[f'{self.symbol}.{entity}' for entity in self._entities]]
-        await self.subscriber.subscribe(routing_keys)
-
-    async def _on_update(self, entity: StreamEntity, symbol: Symbol, data: Dict):
-        assert StreamEntity.has_value(entity)
-        assert symbol == self.symbol
-        assert isinstance(data, dict)
-
-        model_class = self._models[entity]
-        model = model_class(**data)
-        await self._trigger_callbacks(entity, model)
-
-
-class BulkLineClient(BaseLineClient):
-    def __init__(
-            self,
-            symbols: List[Symbol],
-            uri: str,
-            entities: List[StreamEntity],
-    ):
-        self.symbols = symbols
-        super().__init__(uri, entities)
-
-    def add_update_callback(self, entity: StreamEntity, cb: BulkLineCallback):
-        super().add_update_callback(entity, cb)
-
-    async def _subscribe(self):
-        routing_keys = ['alive', *[f'{symbol}.{entity}' for symbol, entity in product(self.symbols, self._entities)]]
-        await self.subscriber.subscribe(routing_keys)
-
-    async def _on_update(self, entity: StreamEntity, symbol: Symbol, data: Dict):
-        assert StreamEntity.has_value(entity)
-        assert symbol in self.symbols
-        assert isinstance(data, dict)
-
-        model_class = self._models[entity]
-        model = model_class(**data)
-        await self._trigger_callbacks(entity, symbol, model)

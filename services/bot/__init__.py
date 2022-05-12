@@ -58,7 +58,7 @@ async def start(orchestrator: StrategiesOrchestrator):
         ],
         conditions_trigger_count=1,
     )
-    await orchestrator.add_strategy(strategy)
+    await orchestrator.run_strategy(strategy)
 
 
 def main():

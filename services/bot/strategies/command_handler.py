@@ -18,8 +18,8 @@ from modules.models.types import (
 )
 
 from services.bot.state import ExchangeState
-from services.bot.strategies.base.utils import method_dispatch
-from services.bot.strategies.base.storage import LocalStorage
+from services.bot.strategies.decorators import method_dispatch
+from services.bot.strategies.storage import LocalStorage
 
 
 class CommandHandler:

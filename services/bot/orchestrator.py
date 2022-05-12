@@ -5,7 +5,7 @@ from typing import Dict, List
 
 from modules.mongo import MongoClient
 from modules.exchanges import BinanceClient
-from modules.line_client import BulkLineClient
+from modules.line_client import LineClient
 
 from modules.models import TradeUpdateModel, BookUpdateModel
 from modules.models.types import StreamEntity, Symbol, TickType, Timestamp
@@ -24,7 +24,7 @@ class StrategiesOrchestrator:
             mongo_uri=settings.mongo_uri,
             indexes=INDEXES,
         )
-        self.line = BulkLineClient(
+        self.line = LineClient(
             symbols=settings.symbols,
             uri=settings.broker_amqp_uri,
             entities=[StreamEntity.BOOK, StreamEntity.TRADE],
@@ -32,26 +32,41 @@ class StrategiesOrchestrator:
         self.exchange = BinanceClient(
             testnet=settings.binance_testnet,
         )
-        self.state = ExchangeState(self.exchange, self.settings.symbols, self.settings.candles_limit)
+        self.state = ExchangeState(
+            exchange=self.exchange,
+            symbols=self.settings.symbols,
+            candles_limit=self.settings.candles_limit
+        )
 
         self._strategies: Dict[Symbol: List[Strategy]] = []
         self._loop = asyncio.get_event_loop()
+        self._event = asyncio.Event()
 
+        self.line.add_reset_callback(self._on_line_reset)
         self.line.add_update_callback(StreamEntity.BOOK, self._on_book_update)
         self.line.add_update_callback(StreamEntity.TRADE, self._on_trade_update)
         # self.line.add_update_callback(StreamEntity.DEPTH, self._on_depth_update)
 
     async def start(self):
+        self.db.connect()
         await self.state.preload()
         await self.line.connect()
+        self._event.set()
 
     async def stop(self):
         await self.line.disconnect()
 
-    async def add_strategy(self, rules: StrategyRules):
+    async def run_strategy(self, rules: StrategyRules):
         strategy = Strategy(rules, self.db, self.state)
         self._strategies.append(strategy)
+
+        if not self._event.is_set():
+            await self._event.wait()
+
         await strategy.start()
+
+    async def _on_line_reset(self):
+        await self.state.preload()
 
     async def _on_book_update(self, symbol: Symbol, model: BookUpdateModel):
         self.state.update_book(symbol, model)
@@ -77,7 +92,7 @@ class StrategiesOrchestrator:
         diff = time() * 1000 - timestamp
         exchange_name = self.exchange.__class__.__name__
 
-        if diff >= 2000:
+        if diff >= 5000:
             logging.warning(f'{exchange_name}: Messages processing delay of {diff / 1000:.2f}s!')
             skip = True
 

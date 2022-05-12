@@ -3,7 +3,7 @@ import itertools
 import logging
 from typing import Dict, List
 
-from modules.exchanges import BinanceClient
+from modules.exchanges.base import BaseExchangeClient
 from modules.models import TradeUpdateModel, ContractModel, BookUpdateModel
 from modules.models.types import Timeframe, Symbol, TickType
 
@@ -13,7 +13,7 @@ from services.bot import Candles
 class ExchangeState:
     TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '4h', '6h', '1d']
 
-    def __init__(self, exchange: BinanceClient, symbols: List[Symbol], candles_limit: int):
+    def __init__(self, exchange: BaseExchangeClient, symbols: List[Symbol], candles_limit: int):
         self.exchange = exchange
         self.candles_limit = candles_limit
 
@@ -51,8 +51,6 @@ class ExchangeState:
         return self.contracts[symbol]
 
     async def _preload_candles(self):
-        logging.info('Preloading candlesticks...')
-
         for symbol, timeframes in self.candles.items():
             tasks = []
 
@@ -64,6 +62,7 @@ class ExchangeState:
                 )
                 tasks.append(task)
 
+            logging.info(f'Preloading candlesticks for {symbol}...')
             result = await asyncio.gather(*tasks)
 
             for snapshot, timeframe in list(zip(result, timeframes)):

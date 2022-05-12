@@ -46,8 +46,15 @@ class LineServer:
     async def _on_connect(self):
         await self.stream.subscribe(self.symbols)
 
+        await self.publisher.publish(
+            action='reset',
+            payload=None,
+            routing_key='reset',
+        )
+
     async def _on_trade_update(self, symbol: Symbol, model: TradeUpdateModel):
-        self._check_delay(model.timestamp)
+        await self._check_delay(model.timestamp)
+
         await self.publisher.publish(
             action='update',
             payload={
@@ -102,9 +109,11 @@ class LineServer:
             finally:
                 await asyncio.sleep(30)
 
-    @staticmethod
-    def _check_delay(timestamp: Timestamp):
+    async def _check_delay(self, timestamp: Timestamp):
         diff = time() * 1000 - timestamp
 
-        if diff >= 2000:
+        if diff >= 5000:
             logging.warning(f'Messages processing delay of {diff / 1000:.2f}s!')
+
+        if diff >= 30000:
+            await self.stream.reset()

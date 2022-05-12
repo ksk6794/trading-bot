@@ -3,7 +3,8 @@ import inspect
 from decimal import Decimal
 from typing import Dict, Optional, List, Callable, Set
 
-from modules.models import ContractModel, AccountModel, FundingRateModel, CandleModel, OrderModel, DepthModel
+from modules.models import ContractModel, AccountModel, FundingRateModel, CandleModel, OrderModel, DepthModel, \
+    BookUpdateModel
 from modules.models.types import (
     Symbol, Timeframe,
     OrderType, OrderSide, OrderId,
@@ -36,6 +37,13 @@ class BaseExchangeClient(metaclass=abc.ABCMeta):
     ) -> List[CandleModel]:
         """
         Candlestick bars snapshot for a symbol.
+        """
+        ...
+
+    @abc.abstractmethod
+    async def get_book(self) -> Dict[Symbol, BookUpdateModel]:
+        """
+        Best price/qty on the order book for a symbol or symbols.
         """
         ...
 

@@ -4,7 +4,7 @@ import time
 
 from pymongo.operations import InsertOne
 
-from modules.line_client import BulkLineClient
+from modules.line_client import LineClient
 from modules.models.indexes import INDEXES
 from modules.models.line import BookUpdateModel, TradeUpdateModel, DepthUpdateModel, UpdateLogModel
 from modules.models.types import StreamEntity, Symbol
@@ -19,7 +19,7 @@ class LineLogger:
             mongo_uri=settings.mongo_uri,
             indexes=INDEXES,
         )
-        self.line = BulkLineClient(
+        self.line = LineClient(
             symbols=settings.symbols,
             uri=settings.broker_amqp_uri,
             entities=settings.entities,
@@ -41,7 +41,7 @@ class LineLogger:
 
     async def stop(self):
         self._started = False
-        await self.line.stop()
+        await self.line.disconnect()
         self._loop.stop()
 
     async def _writer(self):

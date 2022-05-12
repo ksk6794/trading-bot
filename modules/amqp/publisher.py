@@ -32,9 +32,10 @@ class AMQPPublisher:
                     url=self._uri,
                     loop=self._loop
                 )
+                self._connection.add_reconnect_callback(self._reconnect_cb)
 
             except ConnectionError as err:
-                logging.error('AMQPPublisher: %r', err)
+                logging.error('%s: %r', self.__class__.__name__, err)
 
             except IncompatibleProtocolError:
                 pass
@@ -67,6 +68,9 @@ class AMQPPublisher:
                 message=aio_pika.Message(body),
                 routing_key=routing_key,
             )
+
+    def _reconnect_cb(self, *args, **kwargs):
+        logging.info(f'{self.__class__.__name__}: Reconnected')
 
 
 async def main():

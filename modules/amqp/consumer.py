@@ -1,7 +1,6 @@
 import asyncio
 import inspect
 import logging
-import uuid
 from typing import List, Optional, Set, Callable, Dict
 
 import orjson
@@ -24,7 +23,7 @@ class AMQPConsumer:
         self._queue: Optional[Queue] = None
 
         self._loop = asyncio.get_event_loop()
-        self._callbacks: Set[Callable] = set()
+        self._callbacks: Dict[str, Set[Callable]] = {}
         self._consumer_task: Optional[asyncio.Task] = None
 
     async def connect(self):
@@ -35,9 +34,10 @@ class AMQPConsumer:
                     loop=self._loop,
                     connection_class=RobustConnection,
                 )
+                self._connection.add_reconnect_callback(self._reconnect_cb)
 
             except ConnectionError as err:
-                logging.error('AMQPConsumer: %r', err)
+                logging.error(f'%s: %r', self.__class__.__name__, err)
 
             except IncompatibleProtocolError:
                 pass
@@ -73,8 +73,19 @@ class AMQPConsumer:
 
         self._consumer_task = asyncio.create_task(self._consume())
 
-    def add_message_callback(self, cb: Callable):
-        self._callbacks.add(cb)
+    def add_reconnect_callback(self, cb: Callable):
+        self._callbacks.setdefault('reconnect', set()).add(cb)
+
+    def add_update_callback(self, cb: Callable):
+        self._callbacks.setdefault('update', set()).add(cb)
+
+    def add_reset_callback(self, cb: Callable):
+        self._callbacks.setdefault('reset', set()).add(cb)
+
+    def _reconnect_cb(self, *args, **kwargs):
+        logging.info(f'{self.__class__.__name__}: Reconnected')
+        callbacks = self._callbacks.get('reconnect', set())
+        self._loop.create_task(self._trigger_callbacks(callbacks))
 
     async def _consume(self):
         async with self._queue.iterator() as queue_iter:
@@ -83,8 +94,13 @@ class AMQPConsumer:
                     try:
                         body = orjson.loads(message.body)
                         action = body['action']
-                        payload = body.get('payload')
-                        await self._trigger_callbacks(self._callbacks, action, payload)
+                        callbacks = self._callbacks.get(action, set())
+
+                        if action == 'update':
+                            payload = body.get('payload')
+                            await self._trigger_callbacks(callbacks, action, payload)
+                        else:
+                            await self._trigger_callbacks(callbacks)
 
                     except Exception as err:
                         logging.exception('Exception during message processing: %r', err)

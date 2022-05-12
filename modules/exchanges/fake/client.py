@@ -11,67 +11,79 @@ from itertools import chain
 import orjson
 
 from helpers import to_decimal_places
-from modules.line_client import ReplayClient
-from modules.models import ContractModel, CandleModel, AccountModel, OrderModel, BookUpdateModel, DepthModel
+from modules.models import ContractModel, CandleModel, AccountModel, OrderModel, DepthModel, BookUpdateModel
 from modules.models.exchange import AccountBalanceModel, AccountPositionModel, FundingRateModel
 from modules.models.types import (
     Symbol, Timeframe, Asset, OrderType, OrderSide, TimeInForce,
-    OrderId, OrderStatus, PositionSide, UserStreamEntity, MarginType, StreamEntity
+    OrderId, OrderStatus, PositionSide, UserStreamEntity, MarginType
 )
-from modules.exchanges.base import BaseExchangeClient
+from modules.exchanges.base import BaseExchangeClient, BaseExchangeUserClient
 
-__all__ = ('FakeExchangeClient',)
-
-
-class FakeUserStream:
-    def __init__(self):
-        self._callbacks: Dict[UserStreamEntity, Set] = {}
-
-    async def connect(self):
-        pass
-
-    def add_update_callback(self, entity: UserStreamEntity, cb: Callable):
-        self._callbacks.setdefault(entity, set()).add(cb)
-
-    async def trigger_callbacks(self, entity: UserStreamEntity, model):
-        callbacks = self._callbacks.get(entity, set())
-
-        for callback in callbacks:
-            result = callback(model)
-
-            if inspect.isawaitable(result):
-                await result
+__all__ = (
+    'FakeExchangeClient',
+    'FakeExchangeUserClient'
+)
 
 
 class FakeExchangeClient(BaseExchangeClient, ABC):
+    async def get_contracts(self) -> Dict[Symbol, ContractModel]:
+        symbols = self._read('contracts.json')
+        return {contract['symbol']: ContractModel(**contract) for contract in symbols}
+
+    async def get_funding_rate(self, contract: ContractModel) -> Dict[Symbol, FundingRateModel]:
+        pass
+
+    async def get_historical_candles(
+            self,
+            symbol: Symbol,
+            timeframe: Timeframe,
+            limit: int = 1000,
+            start_time: Optional[str] = None
+    ) -> List[CandleModel]:
+        return []
+
+    async def get_book(self) -> Dict[Symbol, BookUpdateModel]:
+        return {}
+
+    async def get_depth(self, symbol: Symbol, limit: int = 1000) -> Optional[DepthModel]:
+        return DepthModel(
+            last_update_id=0,
+        )
+
+    @staticmethod
+    def _read(file_name):
+        path = os.path.join(os.path.dirname(__file__), 'mocks', file_name)
+
+        with open(path, encoding='utf-8') as f:
+            return orjson.loads(f.read())
+
+
+class FakeExchangeUserClient(BaseExchangeUserClient, ABC):
     # https://www.binance.com/en/fee/futureFee
     MAKER_FEE = Decimal('0.0002')  # 0.02% for ≥ 0 BNB
     TAKER_FEE = Decimal('0.0004')  # 0.04% for ≥ 0 BNB
 
     ASSETS: Dict[Asset, Decimal] = {
         Asset('BTC'): Decimal('0'),
-        # Asset('ETH'): Decimal('1'),
+        Asset('ETH'): Decimal('0'),
         # Asset('BNB'): Decimal('1'),
         # Asset('DOT'): Decimal('100'),
-        Asset('USDT'): Decimal('2753.69'),
+        Asset('USDT'): Decimal('1000'),
     }
     SYMBOLS: List[Symbol] = [
         Symbol('BTCUSDT'),
-        # Symbol('ETHUSDT'),
+        Symbol('ETHUSDT'),
         # Symbol('BNBUSDT'),
         # Symbol('DOTUSDT'),
     ]
 
-    def __init__(self, line: ReplayClient, *args, **kwargs):
+    def __init__(self, state, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.line = line
-        self.line.add_update_callback(StreamEntity.BOOK, self._on_book_update)
-
+        self.state = state
         self.user_stream = FakeUserStream()
 
         # Initial state
-        self._book: Optional[BookUpdateModel] = None
         self._leverage: Dict[Symbol: int] = {symbol: 1 for symbol in self.SYMBOLS}
         self._margin_type: Dict[Symbol, MarginType] = {symbol: MarginType.ISOLATED for symbol in self.SYMBOLS}
         self._hedge_mode = False
@@ -109,13 +121,6 @@ class FakeExchangeClient(BaseExchangeClient, ABC):
             ])),
         )
 
-    async def get_contracts(self) -> Dict[Symbol, ContractModel]:
-        symbols = self._read('contracts.json')
-        return {contract['symbol']: ContractModel(**contract) for contract in symbols}
-
-    async def get_funding_rate(self, contract: ContractModel) -> Dict[Symbol, FundingRateModel]:
-        pass
-
     async def change_leverage(self, symbol: Symbol, leverage: int):
         self._leverage[symbol] = leverage
 
@@ -127,20 +132,6 @@ class FakeExchangeClient(BaseExchangeClient, ABC):
 
     async def change_margin_type(self, symbol: Symbol, margin_type: MarginType):
         self._margin_type[symbol] = margin_type
-
-    async def get_historical_candles(
-            self,
-            symbol: Symbol,
-            timeframe: Timeframe,
-            limit: int = 1000,
-            start_time: Optional[str] = None
-    ) -> List[CandleModel]:
-        return []
-
-    async def get_depth(self, symbol: Symbol, limit: int = 1000) -> Optional[DepthModel]:
-        return DepthModel(
-            last_update_id=0,
-        )
 
     async def place_order(
             self,
@@ -159,7 +150,8 @@ class FakeExchangeClient(BaseExchangeClient, ABC):
             raise RuntimeError('Hedge mode must be activated!')
 
         order_id = OrderId(random.randint(100000000, 10000000000))
-        price = self._book.get_price(order_side)
+        book = self.state.get_book(contract.symbol)
+        price = book.get_price(order_side)
         amount = price * quantity
         fee_stake = self._get_fee_stake(order_type)
         commission = amount * fee_stake
@@ -187,7 +179,7 @@ class FakeExchangeClient(BaseExchangeClient, ABC):
                 raise RuntimeError('Invalid quantity!')
 
             # quote asset increasing
-            pnl = position.calc_pnl(self._book, quantity)
+            pnl = position.calc_pnl(book, quantity)
             # TODO: calc with avg_leverage?
             # avg_leverage = position.quantity * price / position.margin
             self._assets[contract.quote_asset] += position.margin * quantity / position.quantity + pnl - commission
@@ -277,12 +269,22 @@ class FakeExchangeClient(BaseExchangeClient, ABC):
 
         return fee
 
-    @staticmethod
-    def _read(file_name):
-        path = os.path.join(os.path.dirname(__file__), 'mocks', file_name)
 
-        with open(path, encoding='utf-8') as f:
-            return orjson.loads(f.read())
+class FakeUserStream:
+    def __init__(self):
+        self._callbacks: Dict[UserStreamEntity, Set] = {}
 
-    def _on_book_update(self, model: BookUpdateModel):
-        self._book = model
+    async def connect(self):
+        pass
+
+    def add_update_callback(self, entity: UserStreamEntity, cb: Callable):
+        self._callbacks.setdefault(entity, set()).add(cb)
+
+    async def trigger_callbacks(self, entity: UserStreamEntity, model):
+        callbacks = self._callbacks.get(entity, set())
+
+        for callback in callbacks:
+            result = callback(model)
+
+            if inspect.isawaitable(result):
+                await result

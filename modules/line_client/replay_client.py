@@ -2,7 +2,7 @@ import asyncio
 import inspect
 import logging
 from datetime import datetime, timedelta
-from typing import Callable, Set, Dict, Optional
+from typing import Callable, Set, Dict, Optional, List
 
 from pydantic import BaseModel
 from pymongo import ASCENDING
@@ -11,7 +11,7 @@ from modules.models.line import UpdateLogModel
 from modules.models.types import Symbol, StreamEntity, Timestamp
 from modules.mongo import MongoClient
 
-from .types import LineCallback
+from .types import BulkLineCallback
 
 __all__ = (
     'ReplayClient',
@@ -22,13 +22,13 @@ class ReplayClient:
     def __init__(
             self,
             db: MongoClient,
-            symbol: Symbol,
+            symbols: List[Symbol],
             replay_speed: int = 1,
             replay_from: Optional[Timestamp] = None,
             replay_to: Optional[Timestamp] = None,
     ):
         self.db = db
-        self.symbol = symbol
+        self.symbols = symbols
         self.replay_speed = replay_speed
         self.replay_from = replay_from
         self.replay_to = replay_to
@@ -48,7 +48,7 @@ class ReplayClient:
             self._connected = False
             self._loop.stop()
 
-    def add_update_callback(self, entity: StreamEntity, cb: LineCallback):
+    def add_update_callback(self, entity: StreamEntity, cb: BulkLineCallback):
         assert callable(cb)
         self._update_callbacks.setdefault(entity, set()).add(cb)
 
@@ -57,7 +57,7 @@ class ReplayClient:
         self._callbacks.setdefault('done', set()).add(cb)
 
     async def _reader(self):
-        query: Dict = {'s': self.symbol}
+        query: Dict = {'s': {'$in': self.symbols}}
 
         if self.replay_from:
             query.setdefault('t', {})['$gte'] = self.replay_from
@@ -86,7 +86,7 @@ class ReplayClient:
                 s = dt.strftime('%d.%m.%Y %H:%M')
                 logging.info(f'Current replay period: {s}')
 
-            await self._trigger_update_callbacks(log.entity, log.get_entity_model())
+            await self._trigger_update_callbacks(log.symbol, log.entity, log.get_entity_model())
             prev_dt = dt
             prev_log = log
             processed_cnt += 1
@@ -106,11 +106,11 @@ class ReplayClient:
             if inspect.isawaitable(result):
                 await result
 
-    async def _trigger_update_callbacks(self, entity: StreamEntity, model: BaseModel):
+    async def _trigger_update_callbacks(self, symbol: Symbol, entity: StreamEntity, model: BaseModel):
         callbacks = self._update_callbacks.get(entity, set())
 
         for callback in callbacks:
-            result = callback(model)
+            result = callback(symbol, model)
 
             if inspect.isawaitable(result):
                 await result

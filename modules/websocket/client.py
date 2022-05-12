@@ -58,6 +58,9 @@ class WebSocketClient:
         self._task = self._loop.create_task(self._fetch(url))
         await self.wait_ready()
 
+    async def reconnect(self):
+        await self._ws.close()
+
     async def _fetch(self, url: URL):
         while True:
             async with self.session.ws_connect(url, receive_timeout=self._receive_timeout) as ws:

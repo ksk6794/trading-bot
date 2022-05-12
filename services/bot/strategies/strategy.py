@@ -7,6 +7,7 @@ from itertools import chain
 from typing import Optional, Set, Callable, List, Dict, Any, Tuple
 
 from helpers import remove_exponent, to_decimal_places
+from modules.exchanges.fake.client import FakeExchangeUserClient
 from modules.models.commands import TrailingStop, PlaceOrder
 from modules.models.exchange import AccountPositionModel, AccountBalanceModel
 
@@ -20,8 +21,8 @@ from modules.models.strategy import StopLossConfig, TakeProfitConfig
 from modules.exchanges import BinanceUserClient, BinanceUserStreamClient
 from modules.exchanges.base import BaseExchangeClient
 
-from services.bot.strategies.base.command_handler import CommandHandler
-from services.bot.strategies.base.storage import LocalStorage
+from services.bot.strategies.command_handler import CommandHandler
+from services.bot.strategies.storage import LocalStorage
 from services.bot.state import ExchangeState
 from services.bot.settings import StrategyRules
 
@@ -37,6 +38,7 @@ class Strategy(metaclass=abc.ABCMeta):
             rules: StrategyRules,
             db: MongoClient,
             state: ExchangeState,
+            replay: bool = False
     ):
         self.rules = rules
         self.db = db
@@ -48,45 +50,20 @@ class Strategy(metaclass=abc.ABCMeta):
         #     )
         #     self.depth.add_gap_callback(self._set_depth_snapshot)
 
-        self.exchange = BinanceUserClient(
-            public_key=rules.binance_public_key,
-            private_key=rules.binance_private_key,
-            testnet=rules.binance_testnet,
-        )
-        self.user_stream = BinanceUserStreamClient(
-            exchange=self.exchange,
-            testnet=rules.binance_testnet,
-        )
+        if replay:
+            self.exchange = FakeExchangeUserClient(self.state)
+            self.user_stream = self.exchange.user_stream
 
-        # if settings.replay:
-        #     logging.warning('*** The strategy is processing historical data! ***')
-        #
-        #     self.line = ReplayClient(
-        #         db=self.db,
-        #         symbol=settings.symbol,
-        #         replay_speed=settings.replay_speed,
-        #         replay_from=settings.replay_from,
-        #         replay_to=settings.replay_to,
-        #     )
-        #     self.line.add_done_callback(self._replay_summary)
-        #     self.exchange = FakeExchangeClient(self.line)
-        #     self.user_stream = self.exchange.user_stream
-        #
-        # else:
-        #     self.line = LineClient(
-        #         symbol=settings.symbol,
-        #         uri=settings.broker_amqp_uri,
-        #         entities=settings.entities,
-        #     )
-        #     self.exchange = BinanceClient(
-        #         public_key=settings.binance_public_key,
-        #         private_key=settings.binance_private_key,
-        #         testnet=settings.binance_testnet,
-        #     )
-        #     self.user_stream = BinanceUserStreamClient(
-        #         exchange=self.exchange,
-        #         testnet=settings.binance_testnet,
-        #     )
+        else:
+            self.exchange = BinanceUserClient(
+                public_key=rules.binance_public_key,
+                private_key=rules.binance_private_key,
+                testnet=rules.binance_testnet,
+            )
+            self.user_stream = BinanceUserStreamClient(
+                exchange=self.exchange,
+                testnet=rules.binance_testnet,
+            )
 
         self.assets: Dict[Asset, AccountBalanceModel] = {}
 
@@ -126,10 +103,6 @@ class Strategy(metaclass=abc.ABCMeta):
     async def stop(self):
         await self._trigger_callbacks('stop')
         self._loop.stop()
-
-    async def _replay_summary(self):
-        # TODO: Implement summary!
-        await self.stop()
 
     def check_signal(self, symbol: Symbol):
         output: Dict[Tuple[PositionSide, OrderSide], Dict[Tuple[Indicator, Timeframe], bool]] = {}
@@ -543,6 +516,10 @@ class Strategy(metaclass=abc.ABCMeta):
 
     async def _configure_leverage(self, symbol: Symbol):
         await self.exchange.change_leverage(symbol, self.rules.leverage)
+
+    @staticmethod
+    def _pct_change(prev_price: Decimal, cur_price: Decimal):
+        return (prev_price - cur_price) / cur_price * 100
 
     async def _trigger_callbacks(self, action: Any, *args, **kwargs):
         callbacks = self._callbacks.get(action, set())
