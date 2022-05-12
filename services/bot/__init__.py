@@ -9,55 +9,67 @@ from modules.models.types import PositionSide, OrderSide
 
 from services.bot.candles import Candles
 from services.bot.orchestrator import StrategiesOrchestrator
-from services.bot.settings import Settings, StrategyRules, StrategyCondition, IndicatorCondition, IndicatorParameter
+from services.bot.settings import Settings, StrategyRules
 
 
 async def start(orchestrator: StrategiesOrchestrator):
     await orchestrator.start()
 
-    strategy = StrategyRules(
-        id='7179559cb2724ff9b86f9cada8387748',
-        name='scalp',
+    data = {
+        'id': '7179559cb2724ff9b86f9cada8387748',
+        'name': 'scalp',
 
-        binance_testnet=True,
-        binance_public_key='082ee3aa4fce336c05145402b36ca2c6f7c3c442d75432b851673076299772e3',
-        binance_private_key='df3c5b194cd3d8f88e8b7fa88ecb2190075286c46e583b556789901b9e964f3f',
+        'binance_testnet': True,
+        'binance_public_key': '082ee3aa4fce336c05145402b36ca2c6f7c3c442d75432b851673076299772e3',
+        'binance_private_key': 'df3c5b194cd3d8f88e8b7fa88ecb2190075286c46e583b556789901b9e964f3f',
 
-        trailing=True,
-        balance_stake=Decimal('0.1'),
-        symbols=['BTCUSDT', 'ETHUSDT'],
-        conditions=[
-            StrategyCondition(
-                position_side=PositionSide.LONG,
-                order_side=OrderSide.BUY,
-                timeframe='5m',
-                indicator='rsi',
-                parameters=[
-                    IndicatorParameter(field='period', value=14),
+        'trailing': True,
+        'balance_stake': Decimal('0.1'),
+        'symbols': ['BTCUSDT', 'ETHUSDT'],
+        'conditions': [
+            {
+                'position_side': PositionSide.LONG,
+                'order_side': OrderSide.BUY,
+                'timeframe': '5m',
+                'indicator': 'rsi',
+                'parameters': [
+                    {'field': 'period', 'value': 14},
                 ],
-                conditions=[
-                    IndicatorCondition(field='rsi', condition='lte', value=35),
+                'conditions': [
+                    {'field': 'rsi', 'condition': 'lte', 'value': 35}
                 ],
-                save_signal_candles=2
-            ),
-            StrategyCondition(
-                position_side=PositionSide.LONG,
-                order_side=OrderSide.BUY,
-                timeframe='5m',
-                indicator='stochastic',
-                parameters=[
-                    IndicatorParameter(field='k_period', value=14),
-                    IndicatorParameter(field='d_period', value=3),
+                'save_signal_candles': 2
+            },
+            {
+                'position_side': PositionSide.LONG,
+                'order_side': OrderSide.BUY,
+                'timeframe': '5m',
+                'indicator': 'stochastic',
+                'parameters': [
+                    {'field': 'k_period', 'value': 14},
+                    {'field': 'd_period', 'value': 3},
                 ],
-                conditions=[
-                    IndicatorCondition(field='%K', condition='lte', value=40),
-                    IndicatorCondition(field='%D', condition='lte', value=40),
+                'conditions': [
+                    {'field': '%K', 'condition': 'lte', 'value': 40},
+                    {'field': '%D', 'condition': 'lte', 'value': 40},
                 ],
-                save_signal_candles=2
-            ),
+                'save_signal_candles': 2
+            },
         ],
-        conditions_trigger_count=1,
-    )
+        'conditions_trigger_count': 2,
+        'stop_loss': {
+            'rate': Decimal('0.025')
+        },
+        'take_profit': {
+            'steps': [
+                {'level': Decimal('0.005'), 'stake': Decimal('0.2')},
+                {'level': Decimal('0.010'), 'stake': Decimal('0.4')},
+                {'level': Decimal('0.015'), 'stake': Decimal('0.4')},
+            ]
+        }
+    }
+
+    strategy = StrategyRules.parse_obj(data)
     await orchestrator.run_strategy(strategy)
 
 

@@ -17,7 +17,6 @@ from modules.models.types import (
     PositionStatus, OrderSide, UserStreamEntity,
     PositionSide, Asset, Timeframe, Symbol, Indicator
 )
-from modules.models.strategy import StopLossConfig, TakeProfitConfig
 from modules.exchanges import BinanceUserClient, BinanceUserStreamClient
 from modules.exchanges.base import BaseExchangeClient
 
@@ -30,8 +29,6 @@ from services.bot.settings import StrategyRules
 class Strategy(metaclass=abc.ABCMeta):
     name: str
     exchange_class: BaseExchangeClient
-    stop_loss: Optional[StopLossConfig] = None
-    take_profit: Optional[TakeProfitConfig] = None
 
     def __init__(
             self,
@@ -43,12 +40,6 @@ class Strategy(metaclass=abc.ABCMeta):
         self.rules = rules
         self.db = db
         self.state = state
-
-        # if settings.depth_limit:
-        #     self.depth = Depth(
-        #         limit=settings.depth_limit,
-        #     )
-        #     self.depth.add_gap_callback(self._set_depth_snapshot)
 
         if replay:
             self.exchange = FakeExchangeUserClient(self.state)
@@ -280,13 +271,6 @@ class Strategy(metaclass=abc.ABCMeta):
 
         return quantity
 
-    # async def _set_depth_snapshot(self):
-    #     depth = await self.exchange.get_depth(
-    #         symbol=self.settings.symbol,
-    #         limit=self.settings.depth_limit,
-    #     )
-    #     self.depth.set_snapshot(depth)
-
     async def on_book_update(self, symbol: Symbol):
         if symbol not in self.rules.symbols:
             return
@@ -323,12 +307,6 @@ class Strategy(metaclass=abc.ABCMeta):
         if self.command_handler.has_outgoing_commands(symbol):
             await self.command_handler.execute(symbol)
 
-    # def _on_depth_update(self, model: DepthUpdateModel):
-    #     if not self._ready:
-    #         return
-    #
-    #     self.depth.update(model)
-
     def _on_account_update(self, model: AccountModel):
         for asset, balance in model.assets.items():
             self.assets[asset] = balance
@@ -341,7 +319,7 @@ class Strategy(metaclass=abc.ABCMeta):
         logging.info('Account config updated! symbol=%s; leverage=%d', model.symbol, model.leverage)
 
     def check_stop_loss(self, symbol: Symbol, position: PositionModel):
-        if not self.stop_loss:
+        if not self.rules.stop_loss:
             return
 
         if position.is_closed or not position.quantity:
@@ -355,12 +333,12 @@ class Strategy(metaclass=abc.ABCMeta):
 
         if position.side is PositionSide.LONG:
             price = book.bid
-            trigger = position.entry_price * (1 - self.stop_loss.rate)
+            trigger = position.entry_price * (1 - self.rules.stop_loss.rate)
             triggered = price <= trigger
 
         elif position.side is PositionSide.SHORT:
             price = book.ask
-            trigger = position.entry_price * (1 + self.stop_loss.rate)
+            trigger = position.entry_price * (1 + self.rules.stop_loss.rate)
             triggered = price >= trigger
 
         if triggered:
@@ -376,7 +354,7 @@ class Strategy(metaclass=abc.ABCMeta):
             )
 
     def check_take_profit(self, symbol: Symbol, position: PositionModel):
-        if not self.take_profit:
+        if not self.rules.take_profit:
             return
 
         if position.is_closed or not position.quantity:
@@ -387,7 +365,7 @@ class Strategy(metaclass=abc.ABCMeta):
 
         triggered = False
         order_side = None
-        steps_count = self.take_profit.steps_count
+        steps_count = self.rules.take_profit.steps_count
         exit_side = position.get_exit_order_side()
         exit_orders = self.storage.get_orders(position.symbol, position.id, exit_side)
         next_step = len(exit_orders) + 1
@@ -395,7 +373,7 @@ class Strategy(metaclass=abc.ABCMeta):
         if steps_count < next_step:
             return
 
-        step = self.take_profit.steps[next_step - 1]
+        step = self.rules.take_profit.steps[next_step - 1]
 
         if position.side is PositionSide.LONG:
             order_side = OrderSide.SELL
@@ -419,7 +397,7 @@ class Strategy(metaclass=abc.ABCMeta):
                 diff_quantity = quantity - prev_quantity
 
             # If stake of the remaining steps less than min_notional - use the entire quantity
-            rest_stake = sum([self.take_profit.steps[i - 1].stake for i in range(next_step, steps_count)])
+            rest_stake = sum([self.rules.take_profit.steps[i - 1].stake for i in range(next_step, steps_count)])
             rest_quantity = position.total_quantity * rest_stake - diff_quantity
 
             if rest_quantity * price < contract.min_notional:
@@ -450,10 +428,6 @@ class Strategy(metaclass=abc.ABCMeta):
     async def _preload_data(self):
         account = await self.exchange.get_account_info()
         self.assets = account.assets
-
-        # if self.settings.depth_limit:
-        #     await self._set_depth_snapshot()
-
         await self._set_positions(account.positions)
 
     async def _set_positions(self, positions: List[AccountPositionModel]):

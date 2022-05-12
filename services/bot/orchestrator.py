@@ -42,13 +42,19 @@ class StrategiesOrchestrator:
         self._loop = asyncio.get_event_loop()
         self._event = asyncio.Event()
 
+        # if settings.depth_limit:
+        #     self.depth = Depth(
+        #         limit=settings.depth_limit,
+        #     )
+        #     self.depth.add_gap_callback(self._set_depth_snapshot)
+
         self.line.add_reset_callback(self._on_line_reset)
         self.line.add_update_callback(StreamEntity.BOOK, self._on_book_update)
         self.line.add_update_callback(StreamEntity.TRADE, self._on_trade_update)
         # self.line.add_update_callback(StreamEntity.DEPTH, self._on_depth_update)
 
     async def start(self):
-        self.db.connect()
+        await self.db.connect()
         await self.state.preload()
         await self.line.connect()
         self._event.set()
@@ -86,6 +92,12 @@ class StrategiesOrchestrator:
 
             for strategy in self._strategies:
                 await strategy.on_candles_update(symbol)
+
+    # def _on_depth_update(self, model: DepthUpdateModel):
+    #     if not self._ready:
+    #         return
+    #
+    #     self.state.depth_update(model)
 
     def _check_delay(self, timestamp: Timestamp) -> bool:
         skip = False

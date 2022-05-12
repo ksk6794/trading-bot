@@ -5,6 +5,7 @@ from pydantic import BaseSettings, conint
 from pydantic.main import BaseModel
 from pydantic.types import condecimal
 
+from modules.models import StopLossConfig, TakeProfitConfig
 from modules.models.types import Symbol, PositionSide, OrderSide, Timeframe, Indicator, Condition, StrategyId, Timestamp
 
 
@@ -22,28 +23,25 @@ class Settings(BaseSettings):
     replay_to: Optional[Timestamp]
 
 
-class IndicatorParameter(BaseModel):
-    field: str
-    value: Any
+class StrategyRules(BaseModel):
+    class StrategyCondition(BaseModel):
+        class IndicatorParameter(BaseModel):
+            field: str
+            value: Any
 
+        class IndicatorCondition(BaseModel):
+            field: str
+            condition: Condition
+            value: Decimal
 
-class IndicatorCondition(BaseModel):
-    field: str
-    condition: Condition
-    value: Decimal
+        position_side: PositionSide
+        order_side: OrderSide
+        timeframe: Timeframe
+        indicator: Indicator
+        parameters: List[IndicatorParameter]
+        conditions: List[IndicatorCondition]
+        save_signal_candles: conint(ge=1, le=10) = 1
 
-
-class StrategyCondition(BaseModel):
-    position_side: PositionSide
-    order_side: OrderSide
-    timeframe: Timeframe
-    indicator: Indicator
-    parameters: List[IndicatorParameter]
-    conditions: List[IndicatorCondition]
-    save_signal_candles: conint(ge=1, le=10) = 1
-
-
-class StrategyRules(BaseSettings):
     id: StrategyId
     name: str
 
@@ -59,3 +57,6 @@ class StrategyRules(BaseSettings):
     symbols: List[Symbol]
     conditions: List[StrategyCondition]
     conditions_trigger_count: int
+
+    stop_loss: Optional[StopLossConfig] = None
+    take_profit: Optional[TakeProfitConfig] = None

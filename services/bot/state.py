@@ -8,6 +8,7 @@ from modules.models import TradeUpdateModel, ContractModel, BookUpdateModel
 from modules.models.types import Timeframe, Symbol, TickType
 
 from services.bot import Candles
+# from services.bot.depth import Depth
 
 
 class ExchangeState:
@@ -20,6 +21,7 @@ class ExchangeState:
         self.contracts: Dict[Symbol, ContractModel] = {}
         self.book: Dict[Symbol, BookUpdateModel] = {}
         self.candles: Dict[Symbol, Dict[Timeframe, Candles]] = {}
+        # self.depth: Dict[Symbol, Depth] = {}
 
         for symbol, timeframe in itertools.product(symbols, self.TIMEFRAMES):
             self.candles.setdefault(symbol, {})[timeframe] = Candles(timeframe, candles_limit)
@@ -28,6 +30,9 @@ class ExchangeState:
         self.contracts = await self.exchange.get_contracts()
         self.book = await self.exchange.get_book()
         await self._preload_candles()
+
+        # if self.settings.depth_limit:
+        #     await self._preload_depth()
 
     def update_candles(self, symbol: Symbol, model: TradeUpdateModel) -> Dict[Timeframe, TickType]:
         output = {}
@@ -67,3 +72,11 @@ class ExchangeState:
 
             for snapshot, timeframe in list(zip(result, timeframes)):
                 timeframes[timeframe].set_snapshot(snapshot)
+
+    # async def _preload_depth(self):
+    #     for symbol, timeframes in self.candles.items():
+    #         depth = await self.exchange.get_depth(
+    #             symbol=symbol,
+    #             limit=self.depth_limit,
+    #         )
+    #         self.depth.set_depth_snapshot(depth)
