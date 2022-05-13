@@ -1,11 +1,14 @@
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Any
 
 from pydantic import BaseModel, condecimal, validator
+from pydantic.types import conint
 
 from modules.models.line import BookUpdateModel
-from modules.models.types import OrderId, PositionSide, Timestamp, Symbol, PositionStatus, PositionId, OrderSide, \
-    StrategyId
+from modules.models.types import (
+    OrderId, PositionId, OrderSide, PositionSide, PositionStatus, Timestamp, Symbol,
+    StrategyId, Condition, Timeframe, Indicator
+)
 
 
 class StopLossConfig(BaseModel):
@@ -71,3 +74,42 @@ class PositionModel(BaseModel):
 
     def get_exit_order_side(self) -> OrderSide:
         return OrderSide.SELL if self.side is PositionSide.LONG else OrderSide.BUY
+
+
+class StrategyRules(BaseModel):
+    class StrategyCondition(BaseModel):
+        class IndicatorParameter(BaseModel):
+            field: str
+            value: Any
+
+        class IndicatorCondition(BaseModel):
+            field: str
+            condition: Condition
+            value: Decimal
+
+        position_side: PositionSide
+        order_side: OrderSide
+        timeframe: Timeframe
+        indicator: Indicator
+        parameters: List[IndicatorParameter]
+        conditions: List[IndicatorCondition]
+        save_signal_candles: conint(ge=1, le=10) = 1
+
+    id: StrategyId
+    name: str
+
+    binance_testnet: bool = False
+    binance_public_key: Optional[str]
+    binance_private_key: Optional[str]
+
+    trailing: bool = False
+    balance_stake: condecimal(gt=Decimal('0'), le=Decimal('1'))
+    leverage: conint(ge=1, le=25) = 1
+    trailing_callback_rate: Optional[Decimal]
+
+    symbols: List[Symbol]
+    conditions: List[StrategyCondition]
+    conditions_trigger_count: int
+
+    stop_loss: Optional[StopLossConfig] = None
+    take_profit: Optional[TakeProfitConfig] = None

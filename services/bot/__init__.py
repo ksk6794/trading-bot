@@ -5,11 +5,13 @@ from signal import SIGINT, SIGTERM
 import uvloop
 
 from logger import setup_logging
+
+from modules.models.strategy import StrategyRules
 from modules.models.types import PositionSide, OrderSide
 
 from services.bot.candles import Candles
 from services.bot.orchestrator import StrategiesOrchestrator
-from services.bot.settings import Settings, StrategyRules
+from services.bot.settings import Settings
 
 
 async def start(orchestrator: StrategiesOrchestrator):

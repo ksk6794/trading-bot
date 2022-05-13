@@ -9,10 +9,11 @@ from modules.line_client import LineClient
 
 from modules.models import TradeUpdateModel, BookUpdateModel
 from modules.models.types import StreamEntity, Symbol, TickType, Timestamp
+from modules.models.strategy import StrategyRules
 from modules.models.indexes import INDEXES
 
 from services.bot.state import ExchangeState
-from services.bot.settings import Settings, StrategyRules
+from services.bot.settings import Settings
 from services.bot.strategies import Strategy
 
 
@@ -64,12 +65,9 @@ class StrategiesOrchestrator:
 
     async def run_strategy(self, rules: StrategyRules):
         strategy = Strategy(rules, self.db, self.state)
-        self._strategies.append(strategy)
-
-        if not self._event.is_set():
-            await self._event.wait()
-
+        await self._event.wait()
         await strategy.start()
+        self._strategies.append(strategy)
 
     async def _on_line_reset(self):
         await self.state.preload()
@@ -88,7 +86,8 @@ class StrategiesOrchestrator:
             return
 
         if any([tick_type is TickType.NEW_CANDLE for tick_type in tick_types.values()]):
-            logging.info(f'{symbol}: Updating strategies...')
+            if self._strategies:
+                logging.info(f'{symbol}: Updating strategies...')
 
             for strategy in self._strategies:
                 await strategy.on_candles_update(symbol)

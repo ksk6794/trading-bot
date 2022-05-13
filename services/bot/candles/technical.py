@@ -63,7 +63,7 @@ class TechnicalAnalysis:
     def get_ma(self, index: int = -1, period: int = 12) -> Dict:
         self._set_ma(period)
 
-        ma = self._get(f'ma_{period}', index)
+        ma = self._get(f'ma', index)
 
         return {
             'ma': ma and to_decimal(ma)
@@ -72,27 +72,31 @@ class TechnicalAnalysis:
     def get_ema(self, index: int = -1, period: int = 12) -> Dict:
         self._set_ema(period)
 
-        ema = self._get(f'ema_{period}', index)
+        ema = self._get('ema', index)
 
         return {
             'ema': ema and to_decimal(ema)
         }
 
     def get_rsi(self, index: int = -1, period: int = 14) -> Dict:
-        if 'rsi' not in self._df:
+        key = f'rsi_{period}'
+
+        if key not in self._df:
             self._set_rsi(period)
 
-        rsi = self._get('rsi', index)
+        rsi = self._get(f'rsi_{period}', index)
 
         return {
             'rsi': rsi and to_decimal(rsi)
         }
 
     def get_roc(self, index: int = -1, period: int = 18) -> Dict:
-        if 'roc' not in self._df:
+        key = f'roc_{period}'
+
+        if key not in self._df:
             self._set_roc(period)
 
-        roc = self._get('roc', index)
+        roc = self._get(key, index)
 
         return {
             'roc': roc and to_decimal(roc)
@@ -101,8 +105,8 @@ class TechnicalAnalysis:
     def get_stochastic(self, index: int = -1, k_period: int = 14, d_period: int = 3) -> Dict[str, Optional[Decimal]]:
         self._set_stochastic(k_period, d_period)
 
-        k = self._get('%K', index)
-        d = self._get('%D', index)
+        k = self._get(f'%K', index)
+        d = self._get(f'%D', index)
 
         return {
             '%K': k and to_decimal(k),
@@ -110,7 +114,7 @@ class TechnicalAnalysis:
         }
 
     def get_obv(self, index: int = -1) -> Dict[str, Optional[Decimal]]:
-        if 'obv' not in self._df:
+        if 'obv' not in self._df or 'obv_pc' not in self._df:
             self._set_obv()
 
         obv = self._get('obv', index)
@@ -122,7 +126,7 @@ class TechnicalAnalysis:
         }
 
     def get_eri_signals(self, index: int = -1) -> Dict[str, bool]:
-        if 'eri_buy' not in self._df:
+        if 'eri_buy' not in self._df or 'eri_sell' not in self._df:
             self._set_eri_signals()
 
         return {
@@ -131,8 +135,7 @@ class TechnicalAnalysis:
         }
 
     def get_ema_signals(self, index: int = -1) -> Dict[str, bool]:
-        if 'ema_golden_cross' not in self._df:
-            self._set_ema_signals()
+        self._set_ema_signals()
 
         return {
             'ema_golden_cross': bool(self._get('ema_golden_cross', index)),
@@ -142,8 +145,7 @@ class TechnicalAnalysis:
         }
 
     def get_sma_signals(self, index: int = -1) -> Dict[str, bool]:
-        if 'sma_golden_cross' not in self._df:
-            self._set_sma_signals()
+        self._set_sma_signals()
 
         return {
             'sma_golden_cross': bool(self._get('sma_golden_cross', index)),
@@ -159,8 +161,7 @@ class TechnicalAnalysis:
             slow_length: int = 26,
             signal_smoothing: int = 9
     ) -> Dict[str, bool]:
-        if 'macd_gt_signal' not in self._df:
-            self._set_macd_signals(fast_length, slow_length, signal_smoothing)
+        self._set_macd_signals(fast_length, slow_length, signal_smoothing)
 
         return {
             'macd_gt_signal': bool(self._get('macd_gt_signal', index)),
@@ -170,8 +171,7 @@ class TechnicalAnalysis:
         }
 
     def get_ichimoku_signals(self, index: int = -1) -> Dict[str, bool]:
-        if 'ichimoku_golden_cross' not in self._df:
-            self._set_ichimoku_signals()
+        self._set_ichimoku_signals()
 
         return {
             'ichimoku_golden_cross': bool(self._get('ichimoku_golden_cross', index)),
@@ -276,19 +276,23 @@ class TechnicalAnalysis:
         rs = avg_gain / avg_loss
         rsi = 100 - 100 / (1 + rs)
         rsi.round(2)
-        self._df['rsi'] = rsi
 
-    def _set_stochastic(self, k_period, d_period):
-        self._df['n_high'] = self._df['high'].rolling(k_period).max()
-        self._df['n_low'] = self._df['low'].rolling(k_period).min()
-        self._df['%K'] = (self._df['close'] - self._df['n_low']) * 100 / (self._df['n_high'] - self._df['n_low'])
-        self._df['%D'] = self._df['%K'].rolling(d_period).mean()
+        key = f'rsi_{period}'
+        self._df[key] = rsi
 
     def _set_roc(self, period: int):
         """
         Calculates the rate of change
         """
-        self._df['roc'] = self._df['close'].diff(period) / self._df['close'].shift(period) * 100
+        key = f'roc_{period}'
+        self._df[key] = self._df['close'].diff(period) / self._df['close'].shift(period) * 100
+
+    def _set_stochastic(self, k_period, d_period):
+        self._df[f'n_high'] = self._df['high'].rolling(k_period).max()
+        self._df[f'n_low'] = self._df['low'].rolling(k_period).min()
+
+        self._df[f'%K'] = (self._df['close'] - self._df[f'n_low']) * 100 / (self._df[f'n_high'] - self._df[f'n_low'])
+        self._df[f'%D'] = self._df[f'%K'].rolling(d_period).mean()
 
     def _set_macd(self, fast_length: int = 12, slow_length: int = 26, signal_smoothing: int = 9):
         """

@@ -11,6 +11,7 @@ from helpers import remove_exponent, to_decimal_places
 from modules.mongo import MongoClient
 from modules.models import OrderModel, PositionModel, AccountModel, AccountConfigModel
 from modules.models.commands import TrailingStop, PlaceOrder
+from modules.models.strategy import StrategyRules
 from modules.models.exchange import AccountPositionModel, AccountBalanceModel
 from modules.models.types import (
     PositionStatus, OrderSide, UserStreamEntity,
@@ -23,7 +24,6 @@ from modules.exchanges.fake.client import FakeExchangeUserClient
 from services.bot.strategies.command_handler import CommandHandler
 from services.bot.strategies.storage import LocalStorage
 from services.bot.state import ExchangeState
-from services.bot.settings import StrategyRules
 
 
 class Strategy(metaclass=abc.ABCMeta):

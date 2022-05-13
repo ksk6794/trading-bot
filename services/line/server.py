@@ -26,6 +26,7 @@ class LineServer:
         self.prices: Dict[Symbol, BookUpdateModel] = {}
         self._loop = asyncio.get_event_loop()
         self._started = False
+        self._counter = 0
 
         self.stream.add_connect_callback(self._on_connect)
         self.stream.add_update_callback(StreamEntity.TRADE, self._on_trade_update)
@@ -38,6 +39,7 @@ class LineServer:
 
         self._started = True
         self._loop.create_task(self._alive_task())
+        self._loop.create_task(self._log_task())
 
     async def stop(self):
         self._started = False
@@ -64,6 +66,7 @@ class LineServer:
             },
             routing_key=f'{symbol}.{StreamEntity.TRADE}',
         )
+        self._counter += 1
 
     async def _on_book_update(self, symbol: Symbol, model: BookUpdateModel):
         prices = self.prices.get(symbol)
@@ -82,6 +85,7 @@ class LineServer:
                 },
                 routing_key=f'{symbol}.{StreamEntity.BOOK}',
             )
+            self._counter += 1
 
     async def _on_depth_update(self, symbol: Symbol, model: DepthUpdateModel):
         await self.publisher.publish(
@@ -93,6 +97,7 @@ class LineServer:
             },
             routing_key=f'{symbol}.{StreamEntity.DEPTH}',
         )
+        self._counter += 1
 
     async def _alive_task(self):
         while self._started:
@@ -108,6 +113,13 @@ class LineServer:
 
             finally:
                 await asyncio.sleep(30)
+
+    async def _log_task(self):
+        while self._started:
+            await asyncio.sleep(60)
+
+            logging.info(f'Published {self._counter} items last minute.')
+            self._counter = 0
 
     async def _check_delay(self, timestamp: Timestamp):
         diff = time() * 1000 - timestamp

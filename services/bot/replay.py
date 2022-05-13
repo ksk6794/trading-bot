@@ -9,10 +9,11 @@ from modules.line_client import ReplayClient
 
 from modules.models import TradeUpdateModel, BookUpdateModel
 from modules.models.types import StreamEntity, Symbol, TickType, PositionSide, OrderSide
+from modules.models.strategy import StrategyRules
 from modules.models.indexes import INDEXES
 
 from services.bot.state import ExchangeState
-from services.bot.settings import Settings, StrategyRules
+from services.bot.settings import Settings
 from services.bot.strategies import Strategy
 
 
