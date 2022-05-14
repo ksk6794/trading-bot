@@ -17,9 +17,8 @@ from modules.models.types import (
     PositionStatus, OrderSide, UserStreamEntity,
     PositionSide, Asset, Timeframe, Symbol, Indicator
 )
-from modules.exchanges import BinanceUserClient, BinanceUserStreamClient
-from modules.exchanges.base import BaseExchangeClient
-from modules.exchanges.fake.client import FakeExchangeUserClient
+from modules.exchanges import BinanceUserStreamClient
+from modules.exchanges.base import BaseExchangeClient, BaseExchangeUserClient
 
 from services.bot.strategies.command_handler import CommandHandler
 from services.bot.strategies.storage import LocalStorage
@@ -35,26 +34,15 @@ class Strategy(metaclass=abc.ABCMeta):
             rules: StrategyRules,
             db: MongoClient,
             state: ExchangeState,
-            replay: bool = False
+            exchange: BaseExchangeUserClient,
+            user_stream: BinanceUserStreamClient,
     ):
         self.rules = rules
         self.db = db
         self.state = state
 
-        if replay:
-            self.exchange = FakeExchangeUserClient(self.state)
-            self.user_stream = self.exchange.user_stream
-
-        else:
-            self.exchange = BinanceUserClient(
-                public_key=rules.binance_public_key,
-                private_key=rules.binance_private_key,
-                testnet=rules.binance_testnet,
-            )
-            self.user_stream = BinanceUserStreamClient(
-                exchange=self.exchange,
-                testnet=rules.binance_testnet,
-            )
+        self.exchange = exchange
+        self.user_stream = user_stream
 
         self.assets: Dict[Asset, AccountBalanceModel] = {}
 
@@ -66,15 +54,16 @@ class Strategy(metaclass=abc.ABCMeta):
         self.command_handler = CommandHandler(
             db=self.db,
             exchange=self.exchange,
-            user_stream=self.user_stream,
             storage=self.storage,
             strategy_id=self.rules.id,
             symbols=self.rules.symbols,
             state=self.state
         )
+        self._busy: Set = set()
 
         self.user_stream.add_update_callback(UserStreamEntity.ACCOUNT_UPDATE, self._on_account_update)
         self.user_stream.add_update_callback(UserStreamEntity.ACCOUNT_CONFIG_UPDATE, self._on_account_config_update)
+        self.user_stream.add_update_callback(UserStreamEntity.ORDER_TRADE_UPDATE, self._on_order_update)
 
     def add_start_callback(self, cb: Callable):
         assert asyncio.iscoroutinefunction(cb)
@@ -278,21 +267,12 @@ class Strategy(metaclass=abc.ABCMeta):
         if not self._ready:
             return
 
-        # Execute commands (trailing)
-        if self.command_handler.has_outgoing_commands(symbol):
-            await self.command_handler.execute(symbol)
-            return
-
         for position_side in PositionSide.values():
             position = self.storage.get_position(symbol, position_side)
 
             if position:
                 self.check_stop_loss(symbol, position)
                 self.check_take_profit(symbol, position)
-
-                # Execute commands
-                if self.command_handler.has_outgoing_commands(symbol):
-                    await self.command_handler.execute(symbol)
 
     async def on_candles_update(self, symbol: Symbol):
         if not self._ready:
@@ -302,10 +282,6 @@ class Strategy(metaclass=abc.ABCMeta):
             return
 
         self.check_signal(symbol)
-
-        # Execute commands
-        if self.command_handler.has_outgoing_commands(symbol):
-            await self.command_handler.execute(symbol)
 
     def _on_account_update(self, model: AccountModel):
         for asset, balance in model.assets.items():
@@ -317,6 +293,9 @@ class Strategy(metaclass=abc.ABCMeta):
     @staticmethod
     def _on_account_config_update(model: AccountConfigModel):
         logging.info('Account config updated! symbol=%s; leverage=%d', model.symbol, model.leverage)
+
+    async def _on_order_update(self, order: OrderModel):
+        await self.command_handler.update_order(order)
 
     def check_stop_loss(self, symbol: Symbol, position: PositionModel):
         if not self.rules.stop_loss:
@@ -422,7 +401,6 @@ class Strategy(metaclass=abc.ABCMeta):
                 )
 
     async def _prepare_resources(self):
-        await self.db.connect()
         await self.user_stream.connect()
 
     async def _preload_data(self):
@@ -441,10 +419,12 @@ class Strategy(metaclass=abc.ABCMeta):
         )
 
         db_positions: Dict[Symbol, Dict[PositionSide, PositionModel]] = {}
+        acc_positions: Dict[Symbol, Dict[PositionSide, AccountPositionModel]] = {}
+        all_positions: List[PositionModel] = []
+
         for position in db_positions_list:
             db_positions.setdefault(position.symbol, {})[position.side] = position
 
-        acc_positions: Dict[Symbol, Dict[PositionSide, AccountPositionModel]] = {}
         for position in positions:
             acc_positions.setdefault(position.symbol, {})[position.side] = position
 
@@ -465,22 +445,28 @@ class Strategy(metaclass=abc.ABCMeta):
 
             # Check for unknown positions
             if len(actual_positions) != len(cur_positions):
-                raise RuntimeError(f'Unknown position found! symbol={symbol}')
+                self._busy.add(symbol)
 
+            all_positions.extend(actual_positions)
             await self._configure_leverage(symbol)
 
-            orders: List[OrderModel] = await self.db.find(
-                model=OrderModel,
-                query={
-                    'id': {
-                        '$in': list(chain.from_iterable([
-                            position.orders
-                            for position in actual_positions
-                        ]))
-                    }
+        orders: List[OrderModel] = await self.db.find(
+            model=OrderModel,
+            query={
+                'id': {
+                    '$in': list(chain.from_iterable([
+                        position.orders
+                        for position in all_positions
+                    ]))
                 }
-            )
-            self.storage.set_snapshot(symbol, actual_positions, orders)
+            }
+        )
+
+        for position in all_positions:
+            self.storage.add_position(position)
+
+        for order in orders:
+            self.storage.add_order(order)
 
     async def _configure_mode(self):
         hedge_mode = await self.exchange.is_hedge_mode()

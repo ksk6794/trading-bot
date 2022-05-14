@@ -17,9 +17,9 @@ from services.bot.settings import Settings
 async def start(orchestrator: StrategiesOrchestrator):
     await orchestrator.start()
 
-    data = {
+    data1 = {
         'id': '7179559cb2724ff9b86f9cada8387748',
-        'name': 'scalp',
+        'name': 'scalp1',
 
         'binance_testnet': True,
         'binance_public_key': '082ee3aa4fce336c05145402b36ca2c6f7c3c442d75432b851673076299772e3',
@@ -38,7 +38,7 @@ async def start(orchestrator: StrategiesOrchestrator):
                     {'field': 'period', 'value': 14},
                 ],
                 'conditions': [
-                    {'field': 'rsi', 'condition': 'lte', 'value': 35}
+                    {'field': 'rsi', 'condition': 'lte', 'value': 25}
                 ],
                 'save_signal_candles': 2
             },
@@ -52,8 +52,8 @@ async def start(orchestrator: StrategiesOrchestrator):
                     {'field': 'd_period', 'value': 3},
                 ],
                 'conditions': [
-                    {'field': '%K', 'condition': 'lte', 'value': 40},
-                    {'field': '%D', 'condition': 'lte', 'value': 40},
+                    {'field': '%K', 'condition': 'lte', 'value': 30},
+                    {'field': '%D', 'condition': 'lte', 'value': 30},
                 ],
                 'save_signal_candles': 2
             },
@@ -70,8 +70,48 @@ async def start(orchestrator: StrategiesOrchestrator):
             ]
         }
     }
+    strategy = StrategyRules.parse_obj(data1)
+    await orchestrator.run_strategy(strategy)
 
-    strategy = StrategyRules.parse_obj(data)
+    data2 = {
+        'id': '34e50c90b4164bb98eef69fafa693cbe',
+        'name': 'scalp2',
+
+        'binance_testnet': True,
+        'binance_public_key': '082ee3aa4fce336c05145402b36ca2c6f7c3c442d75432b851673076299772e3',
+        'binance_private_key': 'df3c5b194cd3d8f88e8b7fa88ecb2190075286c46e583b556789901b9e964f3f',
+
+        'trailing': True,
+        'balance_stake': Decimal('0.1'),
+        'symbols': ['BTCUSDT', 'ETHUSDT'],
+        'conditions': [
+            {
+                'position_side': PositionSide.LONG,
+                'order_side': OrderSide.BUY,
+                'timeframe': '5m',
+                'indicator': 'rsi',
+                'parameters': [
+                    {'field': 'period', 'value': 14},
+                ],
+                'conditions': [
+                    {'field': 'rsi', 'condition': 'lte', 'value': 10}
+                ],
+                'save_signal_candles': 2
+            },
+        ],
+        'conditions_trigger_count': 1,
+        'stop_loss': {
+            'rate': Decimal('0.025')
+        },
+        'take_profit': {
+            'steps': [
+                {'level': Decimal('0.005'), 'stake': Decimal('0.2')},
+                {'level': Decimal('0.010'), 'stake': Decimal('0.4')},
+                {'level': Decimal('0.015'), 'stake': Decimal('0.4')},
+            ]
+        }
+    }
+    strategy = StrategyRules.parse_obj(data2)
     await orchestrator.run_strategy(strategy)
 
 

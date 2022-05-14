@@ -13,7 +13,7 @@ from aiohttp import ClientSession, ClientResponseError, ClientTimeout
 from modules.exchanges.base import BaseExchangeClient, BaseExchangeUserClient
 from modules.exchanges.exceptions import OperationFailed
 from modules.models.types import OrderSide, OrderType, TimeInForce, Symbol, Timeframe, MarginType, PositionSide
-from modules.models import AccountModel, FundingRateModel, CandleModel, ContractModel, OrderModel, DepthModel, BookUpdateModel
+from modules.models import AccountModel, CandleModel, ContractModel, OrderModel, DepthModel, BookUpdateModel
 
 from helpers import remove_exponent, date_to_milliseconds, to_decimal_places
 
@@ -55,6 +55,10 @@ class BinanceRequestMixin:
                         endpoint, body['code'], body['msg']
                     )
 
+                elif resp.status == 429:
+                    # TODO: prevent flood!
+                    logging.error('Too many requests! endpoint="%s"', endpoint)
+
                 else:
                     logging.error('Server respond with status %d', resp.status)
 
@@ -85,14 +89,6 @@ class BinanceClient(BaseExchangeClient, BinanceRequestMixin):
         """
         body = await self._request('GET', '/fapi/v1/exchangeInfo')
         return {contract['symbol']: ContractModel.from_binance(contract) for contract in body['symbols']}
-
-    async def get_funding_rate(self, symbol: Symbol) -> Dict[Symbol, FundingRateModel]:
-        """
-        Mark Price and Funding Rate
-        """
-        params = {'symbol': symbol}
-        body = await self._request('GET', '/fapi/v1/premiumIndex', params)
-        return FundingRateModel.from_binance(body)
 
     async def get_historical_candles(
             self,

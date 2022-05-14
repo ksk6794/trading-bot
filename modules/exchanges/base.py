@@ -3,12 +3,11 @@ import inspect
 from decimal import Decimal
 from typing import Dict, Optional, List, Callable, Set
 
-from modules.models import ContractModel, AccountModel, FundingRateModel, CandleModel, OrderModel, DepthModel, \
-    BookUpdateModel
+from modules.models import ContractModel, AccountModel, CandleModel, OrderModel, DepthModel, BookUpdateModel
 from modules.models.types import (
     Symbol, Timeframe,
     OrderType, OrderSide, OrderId,
-    MarginType, TimeInForce, StreamEntity,
+    MarginType, TimeInForce, StreamEntity, PositionSide,
 )
 
 
@@ -17,13 +16,6 @@ class BaseExchangeClient(metaclass=abc.ABCMeta):
     async def get_contracts(self) -> Dict[Symbol, ContractModel]:
         """
         Current exchange trading rules and symbol information
-        """
-        ...
-
-    @abc.abstractmethod
-    async def get_funding_rate(self, contract: ContractModel) -> Dict[Symbol, FundingRateModel]:
-        """
-        Mark Price and Funding Rate
         """
         ...
 
@@ -93,6 +85,7 @@ class BaseExchangeUserClient(metaclass=abc.ABCMeta):
             order_type: OrderType,
             quantity: Decimal,
             order_side: OrderSide,
+            position_side: PositionSide = PositionSide.BOTH,
             price: Decimal = None,
             tif: Optional[TimeInForce] = None,
     ) -> OrderModel:
@@ -102,14 +95,14 @@ class BaseExchangeUserClient(metaclass=abc.ABCMeta):
         ...
 
     @abc.abstractmethod
-    async def cancel_order(self, contract: ContractModel, order_id: OrderId):
+    async def cancel_order(self, symbol: Symbol, order_id: OrderId):
         """
         Cancel an active order.
         """
         ...
 
     @abc.abstractmethod
-    async def get_order(self, contract: ContractModel, order_id: OrderId) -> OrderModel:
+    async def get_order(self, symbol: Symbol, order_id: OrderId) -> OrderModel:
         """
         Check an order's status.
         """

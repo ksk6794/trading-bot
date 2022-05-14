@@ -199,38 +199,6 @@ class ContractModel(BaseModel):
         )
 
 
-class FundingRateModel(BaseModel):
-    symbol: Symbol
-    mark_price: Decimal
-    index_price: Decimal
-    last_funding_rate_pct: Decimal
-    next_funding_timestamp: Timestamp
-    interest_rate: Decimal
-    timestamp: Timestamp
-
-    @validator(
-        'mark_price',
-        'index_price',
-        'last_funding_rate_pct',
-        'interest_rate',
-        always=True
-    )
-    def validate_decimals(cls, value):
-        return remove_exponent(value)
-
-    @classmethod
-    def from_binance(cls, data: Dict):
-        return cls(
-            symbol=data['symbol'],
-            mark_price=data['markPrice'],
-            index_price=data['indexPrice'],
-            last_funding_rate_pct=Decimal(data['lastFundingRate']) * 100,
-            next_funding_timestamp=data['nextFundingTime'],
-            interest_rate=data['interestRate'],
-            timestamp=data['time']
-        )
-
-
 class OrderModel(BaseModel):
     id: OrderId
     client_order_id: ClientOrderId
@@ -255,7 +223,7 @@ class OrderModel(BaseModel):
             OrderStatus.FILLED,
             OrderStatus.CANCELED,
             OrderStatus.REJECTED,
-            OrderStatus.EXPIRED
+            OrderStatus.EXPIRED,
         )
 
     @classmethod

@@ -4,6 +4,7 @@ from typing import Dict, List
 
 from logger import setup_logging
 from modules.exchanges.fake import FakeExchangeClient
+from modules.exchanges.fake.client import FakeExchangeUserClient
 from modules.mongo import MongoClient
 from modules.line_client import ReplayClient
 
@@ -58,7 +59,9 @@ class StrategiesOrchestrator:
         await self.line.disconnect()
 
     async def run_strategy(self, rules: StrategyRules):
-        strategy = Strategy(rules, self.db, self.state, replay=True)
+        exchange = FakeExchangeUserClient(self.state)
+        stream = exchange.user_stream
+        strategy = Strategy(rules, self.db, self.state, exchange, stream)
         self._strategies.append(strategy)
 
         if not self._event.is_set():
@@ -72,12 +75,18 @@ class StrategiesOrchestrator:
         for strategy in self._strategies:
             await strategy.on_book_update(symbol)
 
+            if strategy.command_handler.has_outgoing_commands(symbol):
+                await strategy.command_handler.execute(symbol)
+
     async def _on_trade_update(self, symbol: Symbol, model: TradeUpdateModel):
         tick_types = self.state.update_candles(symbol, model)
 
         if any([tick_type is TickType.NEW_CANDLE for tick_type in tick_types.values()]):
             for strategy in self._strategies:
                 await strategy.on_candles_update(symbol)
+
+                if strategy.command_handler.has_outgoing_commands(symbol):
+                    await strategy.command_handler.execute(symbol)
 
     async def _replay_summary(self):
         # TODO: Implement summary!

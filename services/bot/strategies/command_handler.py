@@ -6,15 +6,13 @@ from time import time
 from typing import Optional, Callable, Dict, Set, List
 
 from orderedset import OrderedSet
-from expiringdict import ExpiringDict
 
 from modules.mongo import MongoClient
 from modules.models import PositionModel, OrderModel
-from modules.exchanges import BinanceUserClient, BinanceUserStreamClient
+from modules.exchanges.base import BaseExchangeUserClient
 from modules.models.commands import Command, TrailingStop, PlaceOrder
 from modules.models.types import (
-    PositionId, PositionStatus, PositionSide, ClientOrderId, OrderType,
-    UserStreamEntity, Symbol, StrategyId,
+    PositionId, PositionStatus, PositionSide, ClientOrderId, OrderType, Symbol, StrategyId,
 )
 
 from services.bot.state import ExchangeState
@@ -26,8 +24,7 @@ class CommandHandler:
     def __init__(
             self,
             db: MongoClient,
-            exchange: BinanceUserClient,
-            user_stream: BinanceUserStreamClient,
+            exchange: BaseExchangeUserClient,
             storage: LocalStorage,
             strategy_id: StrategyId,
             symbols: List[Symbol],
@@ -35,21 +32,15 @@ class CommandHandler:
     ):
         self.db = db
         self.exchange = exchange
-        self.user_stream = user_stream
         self.storage = storage
         self.strategy_id = strategy_id
         self.symbols = symbols
         self.state = state
 
         self._commands: Dict[Symbol, OrderedSet[Command]] = {}
-        self._waiting: ExpiringDict[ClientOrderId, PlaceOrder] = ExpiringDict(
-            max_len=100,
-            max_age_seconds=30
-        )
+        self._waiting: Dict[ClientOrderId, PlaceOrder] = {}
         self._callbacks: Dict[str, Set[Callable]] = {}
         self._loop = asyncio.get_event_loop()
-
-        self.user_stream.add_update_callback(UserStreamEntity.ORDER_TRADE_UPDATE, self._update_order)
 
     def has_outgoing_commands(self, symbol: Symbol) -> bool:
         return bool(self._commands.get(symbol, set()))
@@ -102,7 +93,7 @@ class CommandHandler:
 
         logging.info(f'Placing order: symbol={command.contract.symbol}')
 
-        await self.exchange.place_order(
+        order = await self.exchange.place_order(
             client_order_id=client_order_id,
             contract=command.contract,
             order_type=OrderType.MARKET,
@@ -111,20 +102,26 @@ class CommandHandler:
             order_side=command.order_side
         )
 
-        # TODO: ?
-        # if order:
-        #     if not order.is_processed:
-        #         order = await self._wait_for_processed(order)
-        #     await self._update_order(order)
+        if order:
+            if not order.is_processed:
+                order = await self._wait_for_processed(order)
+            await self.update_order(order)
 
-    async def _update_order(self, order: OrderModel):
+        else:
+            del self._waiting[client_order_id]
+
+    async def update_order(self, order: OrderModel):
         if order.symbol not in self.symbols:
+            return
+
+        # Skip unknown order updates
+        if order.client_order_id not in self._waiting:
             return
 
         count = await self.db.count(OrderModel, query={'id': order.id})
 
         if not count:
-            command = self._waiting.pop(order.client_order_id, None)
+            command = self._waiting[order.client_order_id]
             order.context = command.context if command and command.context else None
             await self.db.create(order)
 
@@ -146,7 +143,7 @@ class CommandHandler:
                 update_fields={'position_id': position.id},
                 query={'id': order.id}
             )
-            self.storage.add_order(order.symbol, order)
+            self.storage.add_order(order)
 
             logging.info(f'Order filled! '
                          f'position_id={position.id}; '
@@ -155,6 +152,9 @@ class CommandHandler:
                          f'price={order.entry_price};')
 
             await self._update_position(position, order)
+
+        if order.is_processed:
+            del self._waiting[order.client_order_id]
 
     async def _create_position(
             self,
@@ -176,7 +176,7 @@ class CommandHandler:
             create_timestamp=int(time() * 1000),
         )
         await self.db.create(position)
-        self.storage.set_position(symbol, position)
+        self.storage.add_position(position)
 
         logging.info(f'Position created! '
                      f'position_id={position.id};')

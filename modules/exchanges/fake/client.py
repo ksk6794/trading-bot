@@ -12,7 +12,7 @@ import orjson
 
 from helpers import to_decimal_places
 from modules.models import ContractModel, CandleModel, AccountModel, OrderModel, DepthModel, BookUpdateModel
-from modules.models.exchange import AccountBalanceModel, AccountPositionModel, FundingRateModel
+from modules.models.exchange import AccountBalanceModel, AccountPositionModel
 from modules.models.types import (
     Symbol, Timeframe, Asset, OrderType, OrderSide, TimeInForce,
     OrderId, OrderStatus, PositionSide, UserStreamEntity, MarginType
@@ -29,9 +29,6 @@ class FakeExchangeClient(BaseExchangeClient, ABC):
     async def get_contracts(self) -> Dict[Symbol, ContractModel]:
         symbols = self._read('contracts.json')
         return {contract['symbol']: ContractModel(**contract) for contract in symbols}
-
-    async def get_funding_rate(self, contract: ContractModel) -> Dict[Symbol, FundingRateModel]:
-        pass
 
     async def get_historical_candles(
             self,
@@ -241,7 +238,7 @@ class FakeExchangeUserClient(BaseExchangeUserClient, ABC):
     async def cancel_order(self, symbol: Symbol, order_id: OrderId):
         raise NotImplemented
 
-    async def get_order(self, contract: ContractModel, order_id: OrderId) -> OrderModel:
+    async def get_order(self, symbol: Symbol, order_id: OrderId) -> OrderModel:
         return self._orders[order_id]
 
     def _get_entry_orders(self, symbol: Symbol, position_side: PositionSide):

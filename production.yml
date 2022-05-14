@@ -1,22 +1,24 @@
 version: '3.8'
 
 services:
-#  line-1:
+#  bot:
 #    build:
 #      context: "."
 #      dockerfile: ".docker/python-service/Dockerfile"
-#    command: [ "./wait-for-it.sh", "rabbitmq:5672", "--", "python", "-m", "services.line" ]
+#    command: [ "./wait-for-it.sh", "rabbitmq:5672", "--", "python", "-m", "services.bot" ]
 #    environment:
+#      - BINANCE_TESTNET=true
 #      - BROKER_AMQP_URI=amqp://guest:guest@rabbitmq:5672/
 #      - MONGO_URI=mongodb://root:root@mongodb:27017/default
-#      - SYMBOLS=["BTCUSDT","ETHUSDT","BNBUSDT","ADAUSDT","DOTUSDT"]
+#      - ENTITIES=["trade", "book"]
+#      - SYMBOLS=["BTCUSDT", "ETHUSDT"]
 #    volumes:
 #      - .:/service
 #    depends_on:
 #      - mongodb
 #      - rabbitmq
 #
-#  line-2:
+#  line-btc:
 #    build:
 #      context: "."
 #      dockerfile: ".docker/python-service/Dockerfile"
@@ -24,7 +26,22 @@ services:
 #    environment:
 #      - BROKER_AMQP_URI=amqp://guest:guest@rabbitmq:5672/
 #      - MONGO_URI=mongodb://root:root@mongodb:27017/default
-#      - SYMBOLS=["ATOMUSDT","MATICUSDT","AVAXUSDT","DOGEUSDT","TRXUSDT"]
+#      - SYMBOLS=["BTCUSDT"]
+#    volumes:
+#      - .:/service
+#    depends_on:
+#      - mongodb
+#      - rabbitmq
+#
+#  line-eth:
+#    build:
+#      context: "."
+#      dockerfile: ".docker/python-service/Dockerfile"
+#    command: [ "./wait-for-it.sh", "rabbitmq:5672", "--", "python", "-m", "services.line" ]
+#    environment:
+#      - BROKER_AMQP_URI=amqp://guest:guest@rabbitmq:5672/
+#      - MONGO_URI=mongodb://root:root@mongodb:27017/default
+#      - SYMBOLS=["ETHUSDT"]
 #    volumes:
 #      - .:/service
 #    depends_on:

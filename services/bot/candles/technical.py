@@ -52,6 +52,19 @@ class TechnicalAnalysis:
 
         self._df = df
 
+        self._set_rsi(14)
+        self._set_roc(14)
+        self._set_ma(12)
+        self._set_sma(12)
+        self._set_stochastic(14, 3)
+        self._set_obv()
+        self._set_eri()
+        self._set_bollinger_bands_signals(20, 2)
+        self._set_candle_hammer()
+        self._set_candle_evening_star()
+        self._set_candle_shooting_star()
+        self._set_candle_hanging_man()
+
     def get(self, indicator: str, parameters: Dict):
         method = getattr(self, f'get_{indicator}')
         return method(**parameters)
